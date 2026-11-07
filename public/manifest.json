@@ -1,0 +1,18 @@
+{
+  "name": "Boron Q4 Matrix",
+  "short_name": "Boron Q4",
+  "description": "Local-First Q1-Q4 Productivity App based on The Boron Letters & Stephen Covey's Matrix",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b1120",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

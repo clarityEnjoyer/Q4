@@ -1,0 +1,23 @@
+{
+  "name": "q4-boron-matrix",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local-First Q1-Q4 (Boron Letters / Covey Matrix) PWA with CRDT Gist Sync",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "preact": "^10.24.3"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.9.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}
+
