@@ -576,18 +576,35 @@ export function computeBoronAnalytics(
       if (task.quadrant !== 'INBOX') {
         completedByQuadrant[task.quadrant]++;
       }
-      if (task.completedAt) {
-        const completedDateStr = formatDateISO(new Date(task.completedAt));
-        if (task.quadrant === 'Q2') {
-          dailyCompletedQ2.set(
-            completedDateStr,
-            (dailyCompletedQ2.get(completedDateStr) || 0) + 1
-          );
+      const completedTimestamp = task.completedAt || task.clock?.wallTime || task.createdAt;
+      const completedDateStr = completedTimestamp
+        ? formatDateISO(new Date(completedTimestamp))
+        : todayStr;
+
+      if (task.quadrant === 'Q2') {
+        dailyCompletedQ2.set(
+          completedDateStr,
+          (dailyCompletedQ2.get(completedDateStr) || 0) + 1
+        );
+        activeQ2Dates.add(completedDateStr);
+        if (completedDateStr === todayStr) {
+          didQ2Today = true;
+        }
+      }
+
+      if (task.quadrant !== 'INBOX' && task.estimatedMinutes && task.estimatedMinutes > 0) {
+        const dayEntry = dailyFocus.get(completedDateStr) || { q1: 0, q2: 0, q3: 0, q4: 0 };
+        if (task.quadrant === 'Q1') dayEntry.q1 += task.estimatedMinutes;
+        else if (task.quadrant === 'Q2') {
+          dayEntry.q2 += task.estimatedMinutes;
           activeQ2Dates.add(completedDateStr);
           if (completedDateStr === todayStr) {
             didQ2Today = true;
+            todayQ2Minutes += task.estimatedMinutes;
           }
-        }
+        } else if (task.quadrant === 'Q3') dayEntry.q3 += task.estimatedMinutes;
+        else if (task.quadrant === 'Q4') dayEntry.q4 += task.estimatedMinutes;
+        dailyFocus.set(completedDateStr, dayEntry);
       }
     } else {
       activeByQuadrant[task.quadrant]++;

@@ -1,5 +1,6 @@
 import { createStarterState, escalateNeglectedQ2Tasks } from '../core/engine';
 import { AppState, GistSyncConfig } from '../core/types';
+import { THEME_REGISTRY } from '../visuals/themes';
 
 const STATE_STORAGE_KEY = 'boron_q4_crdt_state_v1';
 const NODE_ID_KEY = 'boron_q4_node_id_v1';
@@ -106,11 +107,11 @@ export function loadVisualPrefs(): { themeId: string; density: 'comfortable' | '
     if (!parsed || typeof parsed !== 'object') {
       return defaultPrefs;
     }
+    const isValidTheme =
+      typeof parsed.themeId === 'string' &&
+      THEME_REGISTRY.some((t) => t.id === parsed.themeId);
     return {
-      themeId:
-        typeof parsed.themeId === 'string' && parsed.themeId.length > 0
-          ? parsed.themeId
-          : defaultPrefs.themeId,
+      themeId: isValidTheme ? parsed.themeId : defaultPrefs.themeId,
       density: parsed.density === 'compact' ? 'compact' : 'comfortable',
     };
   } catch {

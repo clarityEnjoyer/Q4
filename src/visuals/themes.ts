@@ -49,20 +49,6 @@ export const THEME_REGISTRY: ThemePreset[] = [
       '--text-dim': '#9099ab',
     },
   },
-  {
-    id: 'warm-paper',
-    label: 'Solar Paper',
-    variables: {
-      '--bg-base': '#f8f5ed',
-      '--bg-card': '#ffffff',
-      '--bg-elevated': '#eee8d5',
-      '--border-subtle': '#e2dac2',
-      '--border-focus': '#c9bfa3',
-      '--text-main': '#1e293b',
-      '--text-muted': '#475569',
-      '--text-dim': '#64748b',
-    },
-  },
 ];
 
 export function applyVisualTheme(themeId: string, density: DensityMode): void {

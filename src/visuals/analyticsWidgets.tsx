@@ -1,5 +1,5 @@
 import type { JSX } from 'preact';
-import type { BoronAnalytics } from '../core/engine';
+import { formatDateISO, type BoronAnalytics } from '../core/engine';
 import type { AppState } from '../core/types';
 
 // Augment BoronAnalytics in case it is extended with 30-day history and morning streak
@@ -46,7 +46,7 @@ function resolveHistory30d(analytics: BoronAnalytics, state: AppState): HistoryD
   const days: string[] = [];
   for (let i = 29; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-    days.push(d.toISOString().slice(0, 10));
+    days.push(formatDateISO(d));
   }
 
   const sessions = Object.values(state.focusSessions || {});
@@ -59,7 +59,7 @@ function resolveHistory30d(analytics: BoronAnalytics, state: AppState): HistoryD
     let q4 = 0;
 
     for (const s of sessions) {
-      const sDate = new Date(s.endedAt).toISOString().slice(0, 10);
+      const sDate = formatDateISO(new Date(s.endedAt));
       if (sDate === dateStr) {
         if (s.quadrant === 'Q1') q1 += s.durationMinutes;
         else if (s.quadrant === 'Q2') q2 += s.durationMinutes;
@@ -70,9 +70,20 @@ function resolveHistory30d(analytics: BoronAnalytics, state: AppState): HistoryD
 
     let completedQ2 = 0;
     for (const t of tasks) {
-      if (t.completed && t.quadrant === 'Q2' && t.completedAt) {
-        const cDate = new Date(t.completedAt).toISOString().slice(0, 10);
-        if (cDate === dateStr) completedQ2++;
+      if (t.completed && t.quadrant !== 'INBOX') {
+        const cTimestamp = t.completedAt || t.clock?.wallTime || t.createdAt;
+        if (cTimestamp) {
+          const cDate = formatDateISO(new Date(cTimestamp));
+          if (cDate === dateStr) {
+            const est = t.estimatedMinutes || 0;
+            if (t.quadrant === 'Q1') q1 += est;
+            else if (t.quadrant === 'Q2') {
+              q2 += est;
+              completedQ2++;
+            } else if (t.quadrant === 'Q3') q3 += est;
+            else if (t.quadrant === 'Q4') q4 += est;
+          }
+        }
       }
     }
 
@@ -104,21 +115,27 @@ function resolveMorningStreak(analytics: BoronAnalytics, state: AppState): numbe
     (t) => !t.deleted && t.completed && t.quadrant === 'Q2'
   );
 
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = formatDateISO(now);
   const didToday =
     analytics.didQ2Today ||
-    sessions.some((s) => s.quadrant === 'Q2' && new Date(s.endedAt).toISOString().slice(0, 10) === todayStr) ||
-    tasks.some((t) => t.completedAt && new Date(t.completedAt).toISOString().slice(0, 10) === todayStr);
+    sessions.some((s) => s.quadrant === 'Q2' && formatDateISO(new Date(s.endedAt)) === todayStr) ||
+    tasks.some((t) => {
+      const ts = t.completedAt || t.clock?.wallTime || t.createdAt;
+      return ts ? formatDateISO(new Date(ts)) === todayStr : false;
+    });
 
   let streak = 0;
   const startOffset = didToday ? 0 : 1;
 
   for (let i = startOffset; i < 365; i++) {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = formatDateISO(d);
     const hadActivity =
-      sessions.some((s) => s.quadrant === 'Q2' && new Date(s.endedAt).toISOString().slice(0, 10) === dateStr) ||
-      tasks.some((t) => t.completedAt && new Date(t.completedAt).toISOString().slice(0, 10) === dateStr);
+      sessions.some((s) => s.quadrant === 'Q2' && formatDateISO(new Date(s.endedAt)) === dateStr) ||
+      tasks.some((t) => {
+        const ts = t.completedAt || t.clock?.wallTime || t.createdAt;
+        return ts ? formatDateISO(new Date(ts)) === dateStr : false;
+      });
 
     if (hadActivity) {
       streak++;
@@ -615,233 +632,7 @@ export const ANALYTICS_WIDGET_REGISTRY: AnalyticsWidget[] = [
     },
   },
 
-  // Widget 3: Quadrant Focus & Task Breakdown
-  {
-    id: 'quadrant-distribution',
-    title: 'Quadrant Focus & Task Breakdown',
-    subtitle: 'Time invested and tasks completed across quadrants',
-    spanFull: false,
-    render: ({ analytics }) => {
-      const focusQ2 = analytics.focusMinutesByQuadrant.Q2 || 0;
-      const focusQ1 = analytics.focusMinutesByQuadrant.Q1 || 0;
-      const focusQ3 = analytics.focusMinutesByQuadrant.Q3 || 0;
-      const focusQ4 = analytics.focusMinutesByQuadrant.Q4 || 0;
-      const totalFocus = focusQ1 + focusQ2 + focusQ3 + focusQ4;
-
-      const compQ2 = analytics.completedByQuadrant.Q2 || 0;
-      const compQ1 = analytics.completedByQuadrant.Q1 || 0;
-      const compQ3 = analytics.completedByQuadrant.Q3 || 0;
-      const compQ4 = analytics.completedByQuadrant.Q4 || 0;
-      const totalComp = compQ1 + compQ2 + compQ3 + compQ4;
-
-      const pFocusQ2 = totalFocus > 0 ? (focusQ2 / totalFocus) * 100 : 0;
-      const pFocusQ1 = totalFocus > 0 ? (focusQ1 / totalFocus) * 100 : 0;
-      const pFocusQ3 = totalFocus > 0 ? (focusQ3 / totalFocus) * 100 : 0;
-      const pFocusQ4 = totalFocus > 0 ? (focusQ4 / totalFocus) * 100 : 0;
-
-      const pCompQ2 = totalComp > 0 ? (compQ2 / totalComp) * 100 : 0;
-      const pCompQ1 = totalComp > 0 ? (compQ1 / totalComp) * 100 : 0;
-      const pCompQ3 = totalComp > 0 ? (compQ3 / totalComp) * 100 : 0;
-      const pCompQ4 = totalComp > 0 ? (compQ4 / totalComp) * 100 : 0;
-
-      return (
-        <div
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '1.1rem 1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '1rem',
-            height: '100%',
-          }}
-        >
-          {/* Header */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: '0.9rem',
-                  fontWeight: 700,
-                  color: 'var(--text-main)',
-                }}
-              >
-                Quadrant Distribution
-              </div>
-              <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)' }}>
-                Total Focus: {formatMinutes(totalFocus)} • Completed: {totalComp} tasks
-              </div>
-            </div>
-
-            {/* Legend */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                fontSize: '0.7rem',
-                fontWeight: 600,
-              }}
-            >
-              <span style={{ color: '#10b981' }}>● Q2</span>
-              <span style={{ color: '#ef4444' }}>● Q1</span>
-              <span style={{ color: '#f59e0b' }}>● Q3</span>
-              <span style={{ color: '#64748b' }}>● Q4</span>
-            </div>
-          </div>
-
-          {/* Focus Minutes Stacked Progress Bar */}
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.74rem',
-                color: 'var(--text-muted)',
-                marginBottom: '0.35rem',
-              }}
-            >
-              <span>Focus Time Logged</span>
-              <span style={{ fontWeight: 600, color: '#10b981' }}>
-                Q2: {Math.round(pFocusQ2)}%
-              </span>
-            </div>
-            <div
-              style={{
-                height: '12px',
-                borderRadius: '999px',
-                background: 'var(--bg-elevated)',
-                display: 'flex',
-                overflow: 'hidden',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              {focusQ2 > 0 && (
-                <div
-                  title={`Q2 Focus: ${formatMinutes(focusQ2)} (${Math.round(pFocusQ2)}%)`}
-                  style={{ width: `${pFocusQ2}%`, background: '#10b981' }}
-                />
-              )}
-              {focusQ1 > 0 && (
-                <div
-                  title={`Q1 Focus: ${formatMinutes(focusQ1)} (${Math.round(pFocusQ1)}%)`}
-                  style={{ width: `${pFocusQ1}%`, background: '#ef4444' }}
-                />
-              )}
-              {focusQ3 > 0 && (
-                <div
-                  title={`Q3 Focus: ${formatMinutes(focusQ3)} (${Math.round(pFocusQ3)}%)`}
-                  style={{ width: `${pFocusQ3}%`, background: '#f59e0b' }}
-                />
-              )}
-              {focusQ4 > 0 && (
-                <div
-                  title={`Q4 Focus: ${formatMinutes(focusQ4)} (${Math.round(pFocusQ4)}%)`}
-                  style={{ width: `${pFocusQ4}%`, background: '#64748b' }}
-                />
-              )}
-              {totalFocus === 0 && (
-                <div style={{ width: '100%', background: 'transparent' }} />
-              )}
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.7rem',
-                color: 'var(--text-dim)',
-                marginTop: '0.25rem',
-              }}
-            >
-              <span>Q2: {formatMinutes(focusQ2)}</span>
-              <span>Q1: {formatMinutes(focusQ1)}</span>
-              <span>Q3: {formatMinutes(focusQ3)}</span>
-              <span>Q4: {formatMinutes(focusQ4)}</span>
-            </div>
-          </div>
-
-          {/* Completed Tasks Stacked Progress Bar */}
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.74rem',
-                color: 'var(--text-muted)',
-                marginBottom: '0.35rem',
-              }}
-            >
-              <span>Tasks Completed</span>
-              <span style={{ fontWeight: 600, color: '#10b981' }}>
-                Q2: {Math.round(pCompQ2)}%
-              </span>
-            </div>
-            <div
-              style={{
-                height: '12px',
-                borderRadius: '999px',
-                background: 'var(--bg-elevated)',
-                display: 'flex',
-                overflow: 'hidden',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              {compQ2 > 0 && (
-                <div
-                  title={`Q2 Tasks: ${compQ2} (${Math.round(pCompQ2)}%)`}
-                  style={{ width: `${pCompQ2}%`, background: '#10b981' }}
-                />
-              )}
-              {compQ1 > 0 && (
-                <div
-                  title={`Q1 Tasks: ${compQ1} (${Math.round(pCompQ1)}%)`}
-                  style={{ width: `${pCompQ1}%`, background: '#ef4444' }}
-                />
-              )}
-              {compQ3 > 0 && (
-                <div
-                  title={`Q3 Tasks: ${compQ3} (${Math.round(pCompQ3)}%)`}
-                  style={{ width: `${pCompQ3}%`, background: '#f59e0b' }}
-                />
-              )}
-              {compQ4 > 0 && (
-                <div
-                  title={`Q4 Tasks: ${compQ4} (${Math.round(pCompQ4)}%)`}
-                  style={{ width: `${pCompQ4}%`, background: '#64748b' }}
-                />
-              )}
-              {totalComp === 0 && (
-                <div style={{ width: '100%', background: 'transparent' }} />
-              )}
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.7rem',
-                color: 'var(--text-dim)',
-                marginTop: '0.25rem',
-              }}
-            >
-              <span>Q2: {compQ2}</span>
-              <span>Q1: {compQ1}</span>
-              <span>Q3: {compQ3}</span>
-              <span>Q4: {compQ4}</span>
-            </div>
-          </div>
-        </div>
-      );
-    },
-  },
-
-  // Widget 4: Q1 -> Q2 Prevention Loop
+  // Widget 3: Q1 -> Q2 Prevention Loop
   {
     id: 'crisis-prevention',
     title: 'Q1 → Q2 Prevention Loop',
