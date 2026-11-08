@@ -1,6 +1,8 @@
-import { mergeAppState } from '../core/crdt';
+import { canonicalStateSignature, mergeAppState } from '../core/crdt';
 import { serializeToMarkdown } from '../core/markdown';
 import { AppState, GistSyncConfig } from '../core/types';
+import { isValidAppState } from './storage';
+import { SyncAdapter, SyncOutcome as CoreSyncOutcome } from './types';
 
 const STATE_FILENAME = 'q4-state.json';
 const MARKDOWN_FILENAME = 'Q4-MATRIX.md';
@@ -10,7 +12,19 @@ export interface SyncOutcome {
   gistId: string;
   gistHtmlUrl?: string;
   syncedAt: number;
+  pushedChanges?: boolean;
+  fromCache?: boolean;
+  remoteId?: string;
+  remoteUrl?: string;
 }
+
+export interface GistCacheEntry {
+  etag: string;
+  remoteState: AppState;
+  htmlUrl?: string;
+}
+
+export const gistCache: Record<string, GistCacheEntry> = {};
 
 function formatGitHubError(status: number, errText: string, statusText: string): string {
   if (status === 403) {
@@ -66,11 +80,24 @@ export async function createNewSecretGist(
   }
 
   const data = await response.json();
+  const etag = response.headers.get('ETag') || '';
+  if (data.id) {
+    gistCache[data.id] = {
+      etag,
+      remoteState: stateToUpload,
+      htmlUrl: data.html_url,
+    };
+  }
+
   return {
     mergedState: stateToUpload,
     gistId: data.id,
     gistHtmlUrl: data.html_url,
     syncedAt,
+    pushedChanges: true,
+    fromCache: false,
+    remoteId: data.id,
+    remoteUrl: data.html_url,
   };
 }
 
@@ -88,30 +115,83 @@ export async function syncWithGitHubGist(
     throw new Error('Enter a Gist ID, or click "Create Secret Gist" first.');
   }
 
+  const cached = gistCache[cleanGistId];
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${cleanToken}`,
+  };
+
+  if (cached?.etag) {
+    headers['If-None-Match'] = cached.etag;
+  }
+
   const getRes = await fetch(`https://api.github.com/gists/${cleanGistId}`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${cleanToken}`,
-    },
+    headers,
   });
 
-  if (!getRes.ok) {
+  if (getRes.status !== 304 && !getRes.ok) {
     const errText = await getRes.text().catch(() => '');
     throw new Error(formatGitHubError(getRes.status, errText, getRes.statusText));
   }
 
-  const gistData = await getRes.json();
-  const remoteStateFile = gistData.files?.[STATE_FILENAME];
+  let remoteState: AppState | null = null;
+  let remoteStateFileExisted = false;
+
+  if (getRes.status === 304 && cached) {
+    remoteState = cached.remoteState;
+    remoteStateFileExisted = true;
+  } else if (getRes.status === 200) {
+    const gistData = await getRes.json();
+    const remoteStateFile = gistData.files?.[STATE_FILENAME];
+
+    if (remoteStateFile) {
+      remoteStateFileExisted = true;
+      if (remoteStateFile.content) {
+        try {
+          const parsed = JSON.parse(remoteStateFile.content);
+          if (isValidAppState(parsed)) {
+            remoteState = parsed;
+            const etag = getRes.headers.get('ETag') || '';
+            gistCache[cleanGistId] = {
+              etag,
+              remoteState,
+              htmlUrl: gistData.html_url,
+            };
+          } else {
+            console.warn('Remote q4-state.json failed validation, using local state.');
+          }
+        } catch (parseErr) {
+          console.warn('Could not parse remote q4-state.json, using local state:', parseErr);
+        }
+      }
+    }
+  }
 
   let mergedState = localState;
-  if (remoteStateFile && remoteStateFile.content) {
-    try {
-      const remoteState = JSON.parse(remoteStateFile.content) as AppState;
-      mergedState = mergeAppState(localState, remoteState);
-    } catch (parseErr) {
-      console.warn('Could not parse remote q4-state.json, using local state:', parseErr);
-    }
+  if (remoteState) {
+    mergedState = mergeAppState(localState, remoteState);
+  }
+
+  if (
+    remoteStateFileExisted &&
+    remoteState &&
+    canonicalStateSignature(mergedState) === canonicalStateSignature(remoteState)
+  ) {
+    const now = Date.now();
+    return {
+      mergedState: {
+        ...mergedState,
+        lastSyncedAt: now,
+      },
+      gistId: cleanGistId,
+      gistHtmlUrl: gistCache[cleanGistId]?.htmlUrl || cached?.htmlUrl,
+      syncedAt: now,
+      pushedChanges: false,
+      fromCache: getRes.status === 304,
+      remoteId: cleanGistId,
+      remoteUrl: gistCache[cleanGistId]?.htmlUrl || cached?.htmlUrl,
+    };
   }
 
   const syncedAt = Date.now();
@@ -144,10 +224,40 @@ export async function syncWithGitHubGist(
   }
 
   const updatedGist = await patchRes.json();
+  const patchEtag = patchRes.headers.get('ETag') || gistCache[cleanGistId]?.etag || '';
+  gistCache[cleanGistId] = {
+    etag: patchEtag,
+    remoteState: finalState,
+    htmlUrl: updatedGist.html_url || gistCache[cleanGistId]?.htmlUrl,
+  };
+
   return {
     mergedState: finalState,
-    gistId: updatedGist.id,
-    gistHtmlUrl: updatedGist.html_url,
+    gistId: updatedGist.id || cleanGistId,
+    gistHtmlUrl: updatedGist.html_url || gistCache[cleanGistId]?.htmlUrl,
     syncedAt,
+    pushedChanges: true,
+    fromCache: false,
+    remoteId: updatedGist.id || cleanGistId,
+    remoteUrl: updatedGist.html_url || gistCache[cleanGistId]?.htmlUrl,
   };
 }
+
+export const gistSyncAdapter: SyncAdapter<GistSyncConfig> = {
+  id: 'github-gist',
+  name: 'GitHub Gist',
+  isConfigured(config: GistSyncConfig): boolean {
+    return Boolean(config?.token?.trim() && config?.gistId?.trim());
+  },
+  async sync(config: GistSyncConfig, localState: AppState): Promise<CoreSyncOutcome> {
+    const outcome = await syncWithGitHubGist(config, localState);
+    return {
+      mergedState: outcome.mergedState,
+      remoteId: outcome.gistId,
+      remoteUrl: outcome.gistHtmlUrl,
+      syncedAt: outcome.syncedAt,
+      pushedChanges: outcome.pushedChanges ?? false,
+      fromCache: outcome.fromCache,
+    };
+  },
+};

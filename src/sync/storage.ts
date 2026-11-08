@@ -4,6 +4,19 @@ import { AppState, GistSyncConfig } from '../core/types';
 const STATE_STORAGE_KEY = 'boron_q4_crdt_state_v1';
 const NODE_ID_KEY = 'boron_q4_node_id_v1';
 const GIST_CONFIG_KEY = 'boron_q4_gist_config_v1';
+const VISUAL_PREFS_KEY = 'boron_q4_visual_prefs_v1';
+
+export function isValidAppState(val: unknown): val is AppState {
+  if (typeof val !== 'object' || val === null) {
+    return false;
+  }
+  const candidate = val as Record<string, unknown>;
+  return (
+    typeof candidate.maxLamport === 'number' &&
+    typeof candidate.tasks === 'object' &&
+    candidate.tasks !== null
+  );
+}
 
 export function getOrCreateNodeId(): string {
   try {
@@ -67,6 +80,49 @@ export function saveGistConfig(config: GistSyncConfig): void {
     localStorage.setItem(GIST_CONFIG_KEY, JSON.stringify(config));
   } catch (err) {
     console.error('Failed to save Gist config:', err);
+  }
+}
+
+export function clearGistToken(): GistSyncConfig {
+  const current = loadGistConfig();
+  const cleared: GistSyncConfig = {
+    ...current,
+    token: '',
+    gistId: '',
+    autoSync: true,
+  };
+  saveGistConfig(cleared);
+  return { token: '', gistId: '', autoSync: true };
+}
+
+export function loadVisualPrefs(): { themeId: string; density: 'comfortable' | 'compact' } {
+  const defaultPrefs = { themeId: 'boron-dark', density: 'comfortable' as const };
+  try {
+    const raw = localStorage.getItem(VISUAL_PREFS_KEY);
+    if (!raw) {
+      return defaultPrefs;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return defaultPrefs;
+    }
+    return {
+      themeId:
+        typeof parsed.themeId === 'string' && parsed.themeId.length > 0
+          ? parsed.themeId
+          : defaultPrefs.themeId,
+      density: parsed.density === 'compact' ? 'compact' : 'comfortable',
+    };
+  } catch {
+    return defaultPrefs;
+  }
+}
+
+export function saveVisualPrefs(prefs: { themeId: string; density: 'comfortable' | 'compact' }): void {
+  try {
+    localStorage.setItem(VISUAL_PREFS_KEY, JSON.stringify(prefs));
+  } catch (err) {
+    console.error('Failed to save visual prefs:', err);
   }
 }
 

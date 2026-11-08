@@ -55,3 +55,4 @@ npm run build
 For complete architectural specifications, mathematical proofs, conflict resolution rules, and the engineering roadmap, see:
 
 👉 **[DEVELOPMENT.md](DEVELOPMENT.md)**
+

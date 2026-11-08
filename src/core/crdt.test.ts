@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { mergeAppState, verifySemilatticeLaws } from './crdt';
 import {
+  addSubtask,
   addTask,
+  computeBoronAnalytics,
   createStarterState,
+  deleteSubtask,
   deleteTask,
   escalateNeglectedQ2Tasks,
   logFocusSession,
@@ -10,6 +13,7 @@ import {
   parseQuickInput,
   resolveQuadrant,
   resolveTaskConflict,
+  toggleSubtask,
   toggleTaskCompleted,
   triageTask,
   updateTaskDetails,
@@ -21,18 +25,18 @@ describe('Boron Q4 CRDT Semilattice & Domain Engine', () => {
     const base = createStarterState('node_base');
 
     let replicaA = { ...base, nodeId: 'node_laptop' };
-    replicaA = addTask(replicaA, 'Implement Raft leader election #q2 +sr ~90m');
+    replicaA = addTask(replicaA, 'Implement Raft leader election ~90m', 'Q2');
     const firstId = Object.keys(replicaA.tasks)[0];
     replicaA = toggleTaskCompleted(replicaA, firstId);
 
     let replicaB = { ...base, nodeId: 'node_phone' };
     const secondId = Object.keys(replicaB.tasks)[1];
     replicaB = triageTask(replicaB, secondId, true, false);
-    replicaB = addTask(replicaB, 'Buy coffee filters #q3 ~10m');
+    replicaB = addTask(replicaB, 'Buy coffee filters ~10m', 'Q3');
 
     let replicaC = { ...base, nodeId: 'node_tablet' };
     replicaC = deleteTask(replicaC, firstId);
-    replicaC = addTask(replicaC, 'Watch classic movie #q4');
+    replicaC = addTask(replicaC, 'Watch classic movie', 'Q4');
 
     const verification = verifySemilatticeLaws(replicaA, replicaB, replicaC);
     expect(verification.idempotent).toBe(true);
@@ -60,14 +64,14 @@ describe('Boron Q4 CRDT Semilattice & Domain Engine', () => {
     expect(resolveQuadrant(false, false)).toBe('Q4');
   });
 
-  it('parses shorthand DSL tokens safely without eating math +1 or invalid due dates', () => {
+  it('parses shorthand DSL tokens (~90m) safely and leaves unparsed tokens in cleanTitle', () => {
     const parsed = parseQuickInput(
       'Finish compilers lab +1 #q2 +mrjp +mimuw due:2026-11-15 ~90m'
     );
-    expect(parsed.cleanTitle).toBe('Finish compilers lab +1');
-    expect(parsed.quadrant).toBe('Q2');
-    expect(parsed.tags).toEqual(['mrjp', 'mimuw']);
-    expect(parsed.dueDate).toBe('2026-11-15');
+    expect(parsed.cleanTitle).toBe('Finish compilers lab +1 #q2 +mrjp +mimuw due:2026-11-15');
+    expect(parsed.quadrant).toBeUndefined();
+    expect(parsed.tags).toEqual([]);
+    expect(parsed.dueDate).toBeUndefined();
     expect(parsed.estimatedMinutes).toBe(90);
 
     // Invalid calendar date or unparsed token stays in title
@@ -80,7 +84,7 @@ describe('Boron Q4 CRDT Semilattice & Domain Engine', () => {
   it('escalates neglected Q2 tasks to Q1 when deadline is <= 36h away', () => {
     let state = createStarterState('node_test');
     const now = new Date('2026-11-07T18:00:00Z');
-    state = addTask(state, 'Prepare exam cheatsheet #q2 due:2026-11-08');
+    state = addTask(state, 'Prepare exam cheatsheet', 'Q2', { dueDate: '2026-11-08' });
 
     const { state: escalated, escalatedCount } = escalateNeglectedQ2Tasks(
       state,
@@ -98,14 +102,15 @@ describe('Boron Q4 CRDT Semilattice & Domain Engine', () => {
   it('roundtrips Markdown export and import including completed status and quadrant badges', () => {
     let state = createStarterState('node_md');
     state = toggleTaskCompleted(state, 'starter_q2_workout');
+    state = addSubtask(state, 'starter_q2_workout', '20 pushups');
     const md = serializeToMarkdown(state);
     expect(md).toContain('# Boron Q4 Matrix');
-    expect(md).toContain('## Q2 • Important, Not Urgent');
+    expect(md).toContain('## Completed');
+    expect(md).toContain('  - [ ] 20 pushups');
 
     const parsedLines = parseMarkdownTaskLines(md);
     const workoutLine = parsedLines.find((l) => l.title.includes('Morning workout'));
     expect(workoutLine?.completed).toBe(true);
-    expect(workoutLine?.quadrant).toBe('Q2');
   });
 
   it('preserves Multi-Value overlap on tied Lamport clocks, lets Edit beat Delete on ties, and forks deterministically', () => {
@@ -144,5 +149,104 @@ describe('Boron Q4 CRDT Semilattice & Domain Engine', () => {
     const forkB = resolveTaskConflict(merged, targetId, 'FORK_OVERLAP');
     const mergedForks = mergeAppState(forkA, forkB);
     expect(Object.keys(mergedForks.tasks).length).toBe(8);
+  });
+
+  it('supports subtask operations (addSubtask, toggleSubtask, deleteSubtask) and preserves semilattice laws under concurrent edits', () => {
+    const base = createStarterState('node_base');
+    const taskId = 'starter_inbox_crdt';
+
+    let state = addSubtask(base, taskId, 'Subtask Alpha');
+    state = addSubtask(state, taskId, 'Subtask Beta');
+    expect(state.tasks[taskId].checklist?.length).toBe(2);
+    const subAlphaId = state.tasks[taskId].checklist![0].id;
+    const subBetaId = state.tasks[taskId].checklist![1].id;
+
+    state = toggleSubtask(state, taskId, subAlphaId);
+    expect(state.tasks[taskId].checklist![0].done).toBe(true);
+    expect(state.tasks[taskId].checklist![1].done).toBe(false);
+
+    state = deleteSubtask(state, taskId, subBetaId);
+    expect(state.tasks[taskId].checklist?.length).toBe(1);
+    expect(state.tasks[taskId].checklist![0].text).toBe('Subtask Alpha');
+
+    let replicaA = { ...state, nodeId: 'node_a' };
+    replicaA = addSubtask(replicaA, taskId, 'Subtask from A');
+
+    let replicaB = { ...state, nodeId: 'node_b' };
+    replicaB = toggleSubtask(replicaB, taskId, subAlphaId);
+
+    let replicaC = { ...state, nodeId: 'node_c' };
+    replicaC = addSubtask(replicaC, taskId, 'Subtask from C');
+
+    const verification = verifySemilatticeLaws(replicaA, replicaB, replicaC);
+    expect(verification.idempotent).toBe(true);
+    expect(verification.commutative).toBe(true);
+    expect(verification.associative).toBe(true);
+
+    const merged = mergeAppState(mergeAppState(replicaA, replicaB), replicaC);
+    expect(merged.tasks[taskId]).toBeDefined();
+  });
+
+  it('verifies computeBoronAnalytics returns 30 items in history30d and computes morningStreakDays', () => {
+    const base = createStarterState('node_streak');
+    const now = new Date('2026-11-08T12:00:00Z');
+
+    const initialAnalytics = computeBoronAnalytics(base, now);
+    expect(initialAnalytics.history30d?.length).toBe(30);
+    expect(initialAnalytics.history30d?.[29].date).toBe('2026-11-08');
+    expect(initialAnalytics.morningStreakDays).toBe(0);
+
+    let state = base;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const timeNov6 = now.getTime() - 2 * dayMs;
+
+    state = {
+      ...state,
+      focusSessions: {
+        ...state.focusSessions,
+        s_nov6: {
+          id: 's_nov6',
+          quadrant: 'Q2',
+          durationMinutes: 45,
+          startedAt: timeNov6 - 45 * 60_000,
+          endedAt: timeNov6,
+          nodeId: 'node_streak',
+        },
+        s_nov7: {
+          id: 's_nov7',
+          quadrant: 'Q2',
+          durationMinutes: 30,
+          startedAt: (now.getTime() - dayMs) - 30 * 60_000,
+          endedAt: now.getTime() - dayMs,
+          nodeId: 'node_streak',
+        },
+      },
+    };
+
+    const streakYesterday = computeBoronAnalytics(state, now);
+    expect(streakYesterday.morningStreakDays).toBe(2);
+
+    state = {
+      ...state,
+      tasks: {
+        ...state.tasks,
+        t_today_q2: {
+          id: 't_today_q2',
+          title: 'Daily Q2 task',
+          quadrant: 'Q2',
+          completed: true,
+          completedAt: now.getTime(),
+          createdAt: now.getTime() - 60_000,
+          focusMinutesLogged: 0,
+          tags: [],
+          clock: { lamport: 10, wallTime: now.getTime(), nodeId: 'node_streak' },
+        },
+      },
+    };
+
+    const streakToday = computeBoronAnalytics(state, now);
+    expect(streakToday.morningStreakDays).toBe(3);
+    expect(streakToday.history30d?.[29].completedQ2Count).toBe(1);
+    expect(streakToday.history30d?.[29].boronIndex).toBe(100);
   });
 });

@@ -32,6 +32,12 @@ export interface LogicalClock {
   nodeId: string;
 }
 
+export interface SubtaskItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
 export interface TaskItem {
   id: string;
   title: string;
@@ -59,7 +65,9 @@ export interface TaskItem {
   preventsTaskId?: string;
 
   /** Tags like +mimuw, +asd, +health */
-  tags: string[];
+  tags?: string[];
+
+  checklist?: SubtaskItem[];
 
   /**
    * CRDT Tombstone: instead of deleting rows from the array (which would
@@ -87,7 +95,8 @@ export interface ConcurrentTaskValue {
   completed: boolean;
   dueDate?: string;
   estimatedMinutes?: number;
-  tags: string[];
+  tags?: string[];
+  checklist?: SubtaskItem[];
   clock: LogicalClock;
 }
 

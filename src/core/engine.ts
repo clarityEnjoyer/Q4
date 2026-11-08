@@ -1,5 +1,12 @@
 import { nextClock } from './crdt';
-import { AppState, FocusSession, Quadrant, QuadrantMeta, TaskItem } from './types';
+import {
+  AppState,
+  FocusSession,
+  Quadrant,
+  QuadrantMeta,
+  SubtaskItem,
+  TaskItem,
+} from './types';
 
 export const QUADRANT_META: Record<Exclude<Quadrant, 'INBOX'>, QuadrantMeta> = {
   Q2: {
@@ -71,27 +78,9 @@ export interface ParsedQuickInput {
   estimatedMinutes?: number;
 }
 
-export function parseQuickInput(raw: string, now: Date = new Date()): ParsedQuickInput {
+export function parseQuickInput(raw: string, _now: Date = new Date()): ParsedQuickInput {
   let text = raw.trim();
-  let quadrant: Quadrant | undefined;
-  const tags: string[] = [];
-  let dueDate: string | undefined;
   let estimatedMinutes: number | undefined;
-
-  // Match #q1, #q2, #q3, #q4, #inbox
-  text = text.replace(/(?:^|\s)#(q1|q2|q3|q4|inbox)\b/gi, (_, q: string) => {
-    quadrant = q.toUpperCase() as Quadrant;
-    return ' ';
-  });
-
-  // Match +tag (must start with a letter so math like "+1" stays intact)
-  text = text.replace(/(?:^|\s)\+([a-zA-Z][a-zA-Z0-9_-]*)/g, (_, tag: string) => {
-    const cleanTag = tag.toLowerCase();
-    if (!tags.includes(cleanTag)) {
-      tags.push(cleanTag);
-    }
-    return ' ';
-  });
 
   // Match ~30m or ~2h
   text = text.replace(/(?:^|\s)~(\d+)(m|h)\b/gi, (fullMatch, num: string, unit: string) => {
@@ -101,41 +90,11 @@ export function parseQuickInput(raw: string, now: Date = new Date()): ParsedQuic
     return ' ';
   });
 
-  // Match due:YYYY-MM-DD or due:today or due:tomorrow or due:+3d
-  text = text.replace(
-    /(?:^|\s)due:([a-zA-Z0-9+-]+)\b/gi,
-    (fullMatch, dueToken: string) => {
-      const lower = dueToken.toLowerCase();
-      let parsedDate: string | undefined;
-      if (lower === 'today') {
-        parsedDate = formatDateISO(now);
-      } else if (lower === 'tomorrow' || lower === 'tmr') {
-        const d = new Date(now);
-        d.setDate(d.getDate() + 1);
-        parsedDate = formatDateISO(d);
-      } else if (/^\+(\d+)d$/.test(lower)) {
-        const days = parseInt(lower.slice(1, -1), 10);
-        const d = new Date(now);
-        d.setDate(d.getDate() + days);
-        parsedDate = formatDateISO(d);
-      } else if (isValidISODate(dueToken)) {
-        parsedDate = dueToken;
-      }
-
-      if (parsedDate) {
-        dueDate = parsedDate;
-        return ' ';
-      }
-      // Keep unrecognized due: tokens intact in title
-      return fullMatch;
-    }
-  );
-
   return {
     cleanTitle: text.replace(/\s+/g, ' ').trim(),
-    quadrant,
-    tags,
-    dueDate,
+    quadrant: undefined,
+    tags: [],
+    dueDate: undefined,
     estimatedMinutes,
   };
 }
@@ -167,6 +126,7 @@ export function addTask(
       | 'completedAt'
       | 'estimatedMinutes'
       | 'tags'
+      | 'checklist'
     >
   >
 ): AppState {
@@ -176,7 +136,7 @@ export function addTask(
   const clock = nextClock(state);
   const id = extra?.id || generateId('task');
   const completed = Boolean(extra?.completed);
-  const mergedTags = Array.from(new Set([...parsed.tags, ...(extra?.tags || [])]));
+  const mergedTags = Array.from(new Set([...(parsed.tags || []), ...(extra?.tags || [])]));
 
   const task: TaskItem = {
     id,
@@ -191,6 +151,7 @@ export function addTask(
     focusMinutesLogged: 0,
     preventsTaskId: extra?.preventsTaskId,
     tags: mergedTags,
+    checklist: extra?.checklist ? extra.checklist.map((s) => ({ ...s })) : undefined,
     clock,
   };
 
@@ -241,7 +202,12 @@ export function moveTask(
 export function updateTaskDetails(
   state: AppState,
   taskId: string,
-  patch: Partial<Pick<TaskItem, 'title' | 'dueDate' | 'estimatedMinutes' | 'notes' | 'tags'>>
+  patch: Partial<
+    Pick<
+      TaskItem,
+      'title' | 'dueDate' | 'estimatedMinutes' | 'notes' | 'tags' | 'checklist'
+    >
+  >
 ): AppState {
   const existing = state.tasks[taskId];
   if (!existing || existing.deleted) return state;
@@ -329,6 +295,7 @@ export function resolveTaskConflict(
           completed: alt.completed,
           estimatedMinutes: alt.estimatedMinutes,
           tags: alt.tags,
+          checklist: alt.checklist,
         }
       );
     }
@@ -350,6 +317,102 @@ export function deleteTask(state: AppState, taskId: string): AppState {
       [taskId]: {
         ...existing,
         deleted: true,
+        concurrentConflicts: undefined,
+        clock,
+      },
+    },
+  };
+}
+
+export function addSubtask(
+  state: AppState,
+  taskId: string,
+  text: string
+): AppState {
+  const existing = state.tasks[taskId];
+  if (!existing || existing.deleted) return state;
+
+  const cleanText = text.trim();
+  if (!cleanText) return state;
+
+  const clock = nextClock(state);
+  const newSubtask: SubtaskItem = {
+    id: generateId('sub'),
+    text: cleanText,
+    done: false,
+  };
+
+  const checklist: SubtaskItem[] = [
+    ...(existing.checklist || []).map((s) => ({ ...s })),
+    newSubtask,
+  ];
+
+  return {
+    ...state,
+    maxLamport: clock.lamport,
+    tasks: {
+      ...state.tasks,
+      [taskId]: {
+        ...existing,
+        checklist,
+        concurrentConflicts: undefined,
+        clock,
+      },
+    },
+  };
+}
+
+export function toggleSubtask(
+  state: AppState,
+  taskId: string,
+  subtaskId: string
+): AppState {
+  const existing = state.tasks[taskId];
+  if (!existing || existing.deleted || !existing.checklist) return state;
+
+  const found = existing.checklist.some((s) => s.id === subtaskId);
+  if (!found) return state;
+
+  const clock = nextClock(state);
+  const checklist = existing.checklist.map((s) =>
+    s.id === subtaskId ? { ...s, done: !s.done } : { ...s }
+  );
+
+  return {
+    ...state,
+    maxLamport: clock.lamport,
+    tasks: {
+      ...state.tasks,
+      [taskId]: {
+        ...existing,
+        checklist,
+        concurrentConflicts: undefined,
+        clock,
+      },
+    },
+  };
+}
+
+export function deleteSubtask(
+  state: AppState,
+  taskId: string,
+  subtaskId: string
+): AppState {
+  const existing = state.tasks[taskId];
+  if (!existing || existing.deleted || !existing.checklist) return state;
+
+  const filtered = existing.checklist.filter((s) => s.id !== subtaskId);
+  if (filtered.length === existing.checklist.length) return state;
+
+  const clock = nextClock(state);
+  return {
+    ...state,
+    maxLamport: clock.lamport,
+    tasks: {
+      ...state.tasks,
+      [taskId]: {
+        ...existing,
+        checklist: filtered.map((s) => ({ ...s })),
         concurrentConflicts: undefined,
         clock,
       },
@@ -446,6 +509,16 @@ export function escalateNeglectedQ2Tasks(
   return { state: current, escalatedCount };
 }
 
+export interface BoronHistoryPoint {
+  date: string;
+  q1Minutes: number;
+  q2Minutes: number;
+  q3Minutes: number;
+  q4Minutes: number;
+  boronIndex: number;
+  completedQ2Count: number;
+}
+
 export interface BoronAnalytics {
   activeByQuadrant: Record<Quadrant, number>;
   completedByQuadrant: Record<Exclude<Quadrant, 'INBOX'>, number>;
@@ -456,6 +529,8 @@ export interface BoronAnalytics {
   preventiveQ2Count: number;
   didQ2Today: boolean;
   todayQ2Minutes: number;
+  history30d?: BoronHistoryPoint[];
+  morningStreakDays?: number;
 }
 
 export function computeBoronAnalytics(
@@ -488,6 +563,10 @@ export function computeBoronAnalytics(
   let didQ2Today = false;
   let todayQ2Minutes = 0;
 
+  const dailyFocus = new Map<string, { q1: number; q2: number; q3: number; q4: number }>();
+  const dailyCompletedQ2 = new Map<string, number>();
+  const activeQ2Dates = new Set<string>();
+
   for (const task of Object.values(state.tasks)) {
     if (task.deleted) continue;
     if (task.escalatedFromQ2) escalatedCrisesCount++;
@@ -497,12 +576,18 @@ export function computeBoronAnalytics(
       if (task.quadrant !== 'INBOX') {
         completedByQuadrant[task.quadrant]++;
       }
-      if (
-        task.quadrant === 'Q2' &&
-        task.completedAt &&
-        formatDateISO(new Date(task.completedAt)) === todayStr
-      ) {
-        didQ2Today = true;
+      if (task.completedAt) {
+        const completedDateStr = formatDateISO(new Date(task.completedAt));
+        if (task.quadrant === 'Q2') {
+          dailyCompletedQ2.set(
+            completedDateStr,
+            (dailyCompletedQ2.get(completedDateStr) || 0) + 1
+          );
+          activeQ2Dates.add(completedDateStr);
+          if (completedDateStr === todayStr) {
+            didQ2Today = true;
+          }
+        }
       }
     } else {
       activeByQuadrant[task.quadrant]++;
@@ -512,12 +597,21 @@ export function computeBoronAnalytics(
   for (const session of Object.values(state.focusSessions || {})) {
     focusMinutesByQuadrant[session.quadrant] =
       (focusMinutesByQuadrant[session.quadrant] || 0) + session.durationMinutes;
-    if (
-      session.quadrant === 'Q2' &&
-      formatDateISO(new Date(session.endedAt)) === todayStr
-    ) {
-      didQ2Today = true;
-      todayQ2Minutes += session.durationMinutes;
+
+    const sessionDateStr = formatDateISO(new Date(session.endedAt));
+    const dayEntry = dailyFocus.get(sessionDateStr) || { q1: 0, q2: 0, q3: 0, q4: 0 };
+    if (session.quadrant === 'Q1') dayEntry.q1 += session.durationMinutes;
+    else if (session.quadrant === 'Q2') dayEntry.q2 += session.durationMinutes;
+    else if (session.quadrant === 'Q3') dayEntry.q3 += session.durationMinutes;
+    else if (session.quadrant === 'Q4') dayEntry.q4 += session.durationMinutes;
+    dailyFocus.set(sessionDateStr, dayEntry);
+
+    if (session.quadrant === 'Q2') {
+      activeQ2Dates.add(sessionDateStr);
+      if (sessionDateStr === todayStr) {
+        didQ2Today = true;
+        todayQ2Minutes += session.durationMinutes;
+      }
     }
   }
 
@@ -541,6 +635,57 @@ export function computeBoronAnalytics(
       ? Math.round((focusMinutesByQuadrant.Q2 / totalFocus) * 100)
       : 0;
 
+  // History 30d (oldest first, 30 calendar days ending at now)
+  const history30d: BoronHistoryPoint[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const dateStr = formatDateISO(d);
+    const dayFocus = dailyFocus.get(dateStr) || { q1: 0, q2: 0, q3: 0, q4: 0 };
+    const completedQ2Count = dailyCompletedQ2.get(dateStr) || 0;
+
+    let q1Sum = 0;
+    let q2Sum = 0;
+    for (let offset = 0; offset < 7; offset++) {
+      const windowDate = new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset);
+      const windowDateStr = formatDateISO(windowDate);
+      const wFocus = dailyFocus.get(windowDateStr);
+      if (wFocus) {
+        q1Sum += wFocus.q1;
+        q2Sum += wFocus.q2;
+      }
+    }
+
+    const boronIndex =
+      q1Sum + q2Sum === 0
+        ? completedQ2Count > 0
+          ? 100
+          : 0
+        : Math.round((q2Sum / (q1Sum + q2Sum)) * 100);
+
+    history30d.push({
+      date: dateStr,
+      q1Minutes: dayFocus.q1,
+      q2Minutes: dayFocus.q2,
+      q3Minutes: dayFocus.q3,
+      q4Minutes: dayFocus.q4,
+      boronIndex,
+      completedQ2Count,
+    });
+  }
+
+  // Morning Streak: count consecutive days ending today (or yesterday if today is not yet active)
+  // where the user logged a Q2 focus session or completed a Q2 task.
+  let streakCheckDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (!activeQ2Dates.has(todayStr)) {
+    streakCheckDate.setDate(streakCheckDate.getDate() - 1);
+  }
+
+  let morningStreakDays = 0;
+  while (activeQ2Dates.has(formatDateISO(streakCheckDate))) {
+    morningStreakDays++;
+    streakCheckDate.setDate(streakCheckDate.getDate() - 1);
+  }
+
   return {
     activeByQuadrant,
     completedByQuadrant,
@@ -551,6 +696,8 @@ export function computeBoronAnalytics(
     preventiveQ2Count,
     didQ2Today,
     todayQ2Minutes,
+    history30d,
+    morningStreakDays,
   };
 }
 

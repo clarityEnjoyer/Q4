@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { verifySemilatticeLaws } from './core/crdt';
 import {
+  addSubtask,
   addTask,
   computeBoronAnalytics,
+  deleteSubtask,
   deleteTask,
   escalateNeglectedQ2Tasks,
   getHoursUntilDue,
@@ -11,6 +13,7 @@ import {
   QUADRANT_META,
   resolveQuadrant,
   resolveTaskConflict,
+  toggleSubtask,
   toggleTaskCompleted,
   triageTask,
   updateTaskDetails,
@@ -19,14 +22,19 @@ import { parseMarkdownTaskLines, serializeToMarkdown } from './core/markdown';
 import { AppState, GistSyncConfig, Quadrant, TaskItem } from './core/types';
 import { createNewSecretGist, syncWithGitHubGist } from './sync/gistSync';
 import {
+  clearGistToken,
   downloadTextFile,
   loadGistConfig,
   loadLocalState,
+  loadVisualPrefs,
   saveGistConfig,
   saveLocalState,
+  saveVisualPrefs,
 } from './sync/storage';
+import { ANALYTICS_WIDGET_REGISTRY } from './visuals/analyticsWidgets';
+import { applyVisualTheme, DensityMode, THEME_REGISTRY } from './visuals/themes';
 
-type ViewMode = 'MATRIX' | 'TRIAGE' | 'MORNING_Q2' | 'SYNC_LAB';
+type ViewMode = 'MATRIX' | 'TRIAGE' | 'MORNING_Q2' | 'ANALYTICS' | 'SYNC_LAB';
 
 export function App() {
   const [state, setState] = useState<AppState>(() => loadLocalState());
@@ -40,14 +48,23 @@ export function App() {
     return 'MATRIX';
   });
 
+  // Visual preferences state (theme & density)
+  const [visualPrefs, setVisualPrefs] = useState(() => loadVisualPrefs());
+
+  useEffect(() => {
+    applyVisualTheme(visualPrefs.themeId, visualPrefs.density);
+    saveVisualPrefs(visualPrefs);
+  }, [visualPrefs]);
+
   // Quick capture bar state
   const [captureText, setCaptureText] = useState('');
   const [captureQuadrant, setCaptureQuadrant] = useState<Quadrant>('INBOX');
+  const [captureDueDate, setCaptureDueDate] = useState<string>('');
   const captureInputRef = useRef<HTMLInputElement>(null);
 
-  // Inline task editing state (`updateTaskDetails`)
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState<string>('');
+  // Inline subtask reduction on click & task drawer state
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [subtaskDraft, setSubtaskDraft] = useState<string>('');
 
   // Rapid 2-Decision Binary Triage state + synchronous ref to prevent fast-keypress drops
   const [importantChoice, setImportantChoice] = useState<boolean | null>(null);
@@ -72,6 +89,13 @@ export function App() {
   const [showCompleted, setShowCompleted] = useState<boolean>(false);
   const [showMarkdownBox, setShowMarkdownBox] = useState<boolean>(false);
   const [importMarkdownText, setImportMarkdownText] = useState<string>('');
+
+  // Lamport clock tracker for automatic background Gist sync
+  const lastSyncedLamportRef = useRef<number>(state.maxLamport);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const gistConfigRef = useRef(gistConfig);
+  gistConfigRef.current = gistConfig;
 
   useEffect(() => {
     saveLocalState(state);
@@ -202,7 +226,7 @@ export function App() {
       if (isTextEntryFocused) {
         if (e.key === 'Escape') {
           target?.blur();
-          setEditingTaskId(null);
+          setExpandedTaskId(null);
         }
         return;
       }
@@ -229,7 +253,7 @@ export function App() {
         }
       }
 
-      // Number keys 1-4 switch views; '/' focuses quick capture
+      // Number keys 1-5 switch views; '/' focuses quick capture
       if (e.key === '1') {
         e.preventDefault();
         setViewMode('MATRIX');
@@ -241,10 +265,15 @@ export function App() {
         setViewMode('MORNING_Q2');
       } else if (e.key === '4') {
         e.preventDefault();
+        setViewMode('ANALYTICS');
+      } else if (e.key === '5') {
+        e.preventDefault();
         setViewMode('SYNC_LAB');
       } else if (e.key === '/') {
         e.preventDefault();
         captureInputRef.current?.focus();
+      } else if (e.key === 'Escape') {
+        setExpandedTaskId(null);
       }
     };
 
@@ -255,15 +284,13 @@ export function App() {
   const handleQuickAdd = (e: Event) => {
     e.preventDefault();
     if (!captureText.trim()) return;
-    setState((curr) => addTask(curr, captureText, captureQuadrant));
+    setState((curr) =>
+      addTask(curr, captureText, captureQuadrant, {
+        dueDate: captureDueDate || undefined,
+      })
+    );
     setCaptureText('');
-  };
-
-  const handleCommitInlineEdit = (taskId: string) => {
-    if (editingTitle.trim()) {
-      setState((curr) => updateTaskDetails(curr, taskId, { title: editingTitle }));
-    }
-    setEditingTaskId(null);
+    setCaptureDueDate('');
   };
 
   const handleToggleComplete = (task: TaskItem) => {
@@ -288,11 +315,16 @@ export function App() {
   };
 
   const handleSyncGist = async () => {
+    const config = gistConfigRef.current;
+    const currentState = stateRef.current;
+    if (!config.token.trim() || !config.gistId.trim()) return;
+
     setSyncStatus('syncing');
     setSyncMessage('Syncing (local ⊔ remote)...');
     try {
-      const outcome = await syncWithGitHubGist(gistConfig, state);
+      const outcome = await syncWithGitHubGist(config, currentState);
       setState(outcome.mergedState);
+      lastSyncedLamportRef.current = outcome.mergedState.maxLamport;
       setSyncStatus('success');
       setSyncMessage(
         `Synced ${new Date(outcome.syncedAt).toLocaleTimeString([], {
@@ -313,6 +345,7 @@ export function App() {
       const outcome = await createNewSecretGist(gistConfig.token, state);
       setGistConfig((prev) => ({ ...prev, gistId: outcome.gistId }));
       setState(outcome.mergedState);
+      lastSyncedLamportRef.current = outcome.mergedState.maxLamport;
       setSyncStatus('success');
       setSyncMessage(`Created Gist: ${outcome.gistId}`);
     } catch (err: unknown) {
@@ -320,6 +353,52 @@ export function App() {
       setSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+
+  // Automatic Gist synchronization on maxLamport increase (debounced 2000ms)
+  useEffect(() => {
+    if (
+      !gistConfig.autoSync ||
+      !gistConfig.token.trim() ||
+      !gistConfig.gistId.trim()
+    ) {
+      return;
+    }
+
+    if (state.maxLamport > lastSyncedLamportRef.current) {
+      const timer = window.setTimeout(() => {
+        handleSyncGist();
+      }, 2000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [state.maxLamport, gistConfig.autoSync, gistConfig.token, gistConfig.gistId]);
+
+  // Automatic Gist synchronization on window 'online' & document 'visibilitychange'
+  useEffect(() => {
+    if (
+      !gistConfig.autoSync ||
+      !gistConfig.token.trim() ||
+      !gistConfig.gistId.trim()
+    ) {
+      return;
+    }
+
+    const handleOnline = () => {
+      handleSyncGist();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleSyncGist();
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [gistConfig.autoSync, gistConfig.token, gistConfig.gistId]);
 
   const semilatticeProof = useMemo(() => {
     const replicaLaptop = addTask(
@@ -341,7 +420,7 @@ export function App() {
 
   return (
     <div class="app-shell">
-      {/* Simplified Header */}
+      {/* Header */}
       <header class="topbar">
         <div class="brand">
           <h1>Boron Q4</h1>
@@ -354,6 +433,41 @@ export function App() {
           >
             Q2: {analytics.todayQ2Minutes}m today
           </span>
+
+          {/* Theme selector */}
+          <select
+            class="pill"
+            style={{ cursor: 'pointer', appearance: 'auto' }}
+            value={visualPrefs.themeId}
+            aria-label="Theme Selection"
+            onChange={(e) =>
+              setVisualPrefs((prev) => ({
+                ...prev,
+                themeId: (e.target as HTMLSelectElement).value,
+              }))
+            }
+          >
+            {THEME_REGISTRY.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Density toggle button */}
+          <button
+            type="button"
+            class="pill"
+            title="Toggle display density"
+            onClick={() =>
+              setVisualPrefs((prev) => ({
+                ...prev,
+                density: prev.density === 'comfortable' ? 'compact' : 'comfortable',
+              }))
+            }
+          >
+            {visualPrefs.density === 'comfortable' ? 'Comfortable' : 'Compact'}
+          </button>
 
           <button
             type="button"
@@ -385,7 +499,6 @@ export function App() {
           onClick={() => setViewMode('MATRIX')}
         >
           <span>Matrix</span>
-          <span class="kbd-hint">1</span>
         </button>
 
         <button
@@ -397,7 +510,6 @@ export function App() {
           {inboxTasks.length > 0 && (
             <span class="badge-count">{inboxTasks.length}</span>
           )}
-          <span class="kbd-hint">2</span>
         </button>
 
         <button
@@ -407,7 +519,14 @@ export function App() {
         >
           <span>Q2 Focus</span>
           <span class="badge-count badge-q2">{q2Tasks.length}</span>
-          <span class="kbd-hint">3</span>
+        </button>
+
+        <button
+          type="button"
+          class={`nav-tab ${viewMode === 'ANALYTICS' ? 'active' : ''}`}
+          onClick={() => setViewMode('ANALYTICS')}
+        >
+          <span>Analytics</span>
         </button>
 
         <button
@@ -416,7 +535,6 @@ export function App() {
           onClick={() => setViewMode('SYNC_LAB')}
         >
           <span>Sync & Lab</span>
-          <span class="kbd-hint">4</span>
         </button>
       </nav>
 
@@ -427,9 +545,18 @@ export function App() {
             ref={captureInputRef}
             type="text"
             class="capture-input"
-            placeholder="Add task... (#q1-#q4, due:YYYY-MM-DD, +tag, ~30m — press / to focus)"
+            placeholder="Add task... (~30m optional — press / to focus)"
             value={captureText}
             onInput={(e) => setCaptureText((e.target as HTMLInputElement).value)}
+          />
+          <input
+            type="date"
+            class="capture-date"
+            aria-label="Due Date"
+            value={captureDueDate}
+            onInput={(e) =>
+              setCaptureDueDate((e.target as HTMLInputElement).value)
+            }
           />
           <select
             class="capture-select"
@@ -546,6 +673,14 @@ export function App() {
                           hoursLeft <= 72 &&
                           !task.completed;
 
+                        const totalChecklist = task.checklist?.length || 0;
+                        const doneChecklist =
+                          task.checklist?.filter((s) => s.done).length || 0;
+                        const checklistPct =
+                          totalChecklist > 0
+                            ? Math.round((doneChecklist / totalChecklist) * 100)
+                            : 0;
+
                         return (
                           <div
                             key={task.id}
@@ -559,41 +694,18 @@ export function App() {
                                 onChange={() => handleToggleComplete(task)}
                                 aria-label={`Complete "${task.title}"`}
                               />
-                              <div class="task-body">
-                                {editingTaskId === task.id ? (
-                                  <input
-                                    type="text"
-                                    class="capture-input"
-                                    style={{ padding: '0.2rem 0.45rem', fontSize: '0.85rem' }}
-                                    value={editingTitle}
-                                    onInput={(e) =>
-                                      setEditingTitle(
-                                        (e.target as HTMLInputElement).value
-                                      )
-                                    }
-                                    onBlur={() => handleCommitInlineEdit(task.id)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handleCommitInlineEdit(task.id);
-                                      } else if (e.key === 'Escape') {
-                                        setEditingTaskId(null);
-                                      }
-                                    }}
-                                    autoFocus
-                                  />
-                                ) : (
-                                  <div
-                                    class="task-title"
-                                    title="Click to edit title"
-                                    onClick={() => {
-                                      setEditingTaskId(task.id);
-                                      setEditingTitle(task.title);
-                                    }}
-                                  >
-                                    {task.title}
-                                  </div>
-                                )}
+                              <div
+                                class="task-body"
+                                onClick={() =>
+                                  setExpandedTaskId(
+                                    expandedTaskId === task.id ? null : task.id
+                                  )
+                                }
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <div class="task-title" title="Click to expand/edit">
+                                  {task.title}
+                                </div>
 
                                 <div class="task-meta">
                                   {(task.escalatedFromQ2 || isDriftingToQ1) && (
@@ -604,6 +716,27 @@ export function App() {
                                         : `${Math.max(0, Math.round(hoursLeft!))}h`}
                                     </span>
                                   )}
+                                  {totalChecklist > 0 && (
+                                    <>
+                                      <span class="tag-chip">
+                                        ✓ {doneChecklist}/{totalChecklist}
+                                      </span>
+                                      <span
+                                        class="subtask-progress-mini"
+                                        title={`${checklistPct}% completed`}
+                                      >
+                                        <span
+                                          class="subtask-progress-bar"
+                                          style={{ width: `${checklistPct}%` }}
+                                        />
+                                      </span>
+                                    </>
+                                  )}
+                                  {task.focusMinutesLogged > 0 && (
+                                    <span class="tag-chip tag-q2-focus">
+                                      {task.focusMinutesLogged}m logged
+                                    </span>
+                                  )}
                                   {task.dueDate && (
                                     <span class="tag-chip">{task.dueDate}</span>
                                   )}
@@ -612,16 +745,12 @@ export function App() {
                                       ~{task.estimatedMinutes}m
                                     </span>
                                   )}
-                                  {task.tags?.map((tag) => (
-                                    <span key={tag} class="tag-chip">
-                                      +{tag}
-                                    </span>
-                                  ))}
                                 </div>
 
                                 {task.concurrentConflicts &&
                                   task.concurrentConflicts.length > 0 && (
                                     <div
+                                      onClick={(e) => e.stopPropagation()}
                                       style={{
                                         marginTop: '0.3rem',
                                         padding: '0.35rem 0.55rem',
@@ -675,6 +804,154 @@ export function App() {
                                       </span>
                                     </div>
                                   )}
+
+                                {expandedTaskId === task.id && (
+                                  <div
+                                    class="task-drawer-inline"
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'default' }}
+                                  >
+                                    <div class="task-edit-row">
+                                      <input
+                                        type="text"
+                                        class="capture-input"
+                                        style={{
+                                          padding: '0.25rem 0.45rem',
+                                          fontSize: '0.82rem',
+                                        }}
+                                        placeholder="Task title..."
+                                        defaultValue={task.title}
+                                        onBlur={(e) => {
+                                          const val = (e.target as HTMLInputElement).value.trim();
+                                          if (val && val !== task.title) {
+                                            setState((curr) =>
+                                              updateTaskDetails(curr, task.id, {
+                                                title: val,
+                                              })
+                                            );
+                                          }
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            const val = (e.currentTarget as HTMLInputElement).value.trim();
+                                            if (val && val !== task.title) {
+                                              setState((curr) =>
+                                                updateTaskDetails(curr, task.id, {
+                                                  title: val,
+                                                })
+                                              );
+                                            }
+                                            (e.currentTarget as HTMLInputElement).blur();
+                                          }
+                                        }}
+                                      />
+                                      <input
+                                        type="date"
+                                        class="capture-date"
+                                        aria-label="Due Date"
+                                        value={task.dueDate || ''}
+                                        onInput={(e) => {
+                                          const val = (e.target as HTMLInputElement).value;
+                                          setState((curr) =>
+                                            updateTaskDetails(curr, task.id, {
+                                              dueDate: val || undefined,
+                                            })
+                                          );
+                                        }}
+                                      />
+                                      <input
+                                        type="text"
+                                        class="capture-input"
+                                        style={{
+                                          padding: '0.25rem 0.45rem',
+                                          fontSize: '0.82rem',
+                                        }}
+                                        placeholder="Notes..."
+                                        value={task.notes || ''}
+                                        onInput={(e) => {
+                                          const val = (e.target as HTMLInputElement).value;
+                                          setState((curr) =>
+                                            updateTaskDetails(curr, task.id, {
+                                              notes: val,
+                                            })
+                                          );
+                                        }}
+                                      />
+                                    </div>
+
+                                    {totalChecklist > 0 && (
+                                      <div class="subtask-list">
+                                        {(task.checklist || []).map((item) => (
+                                          <div
+                                            key={item.id}
+                                            class={`subtask-item ${item.done ? 'done' : ''}`}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={item.done}
+                                              onChange={() =>
+                                                setState((curr) =>
+                                                  toggleSubtask(curr, task.id, item.id)
+                                                )
+                                              }
+                                              aria-label={`Toggle subtask "${item.text}"`}
+                                            />
+                                            <span class="subtask-text">
+                                              {item.text}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              class="icon-btn"
+                                              title="Delete subtask"
+                                              onClick={() =>
+                                                setState((curr) =>
+                                                  deleteSubtask(curr, task.id, item.id)
+                                                )
+                                              }
+                                            >
+                                              ✕
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    <form
+                                      class="subtask-add-form"
+                                      onSubmit={(e) => {
+                                        e.preventDefault();
+                                        if (!subtaskDraft.trim()) return;
+                                        setState((curr) =>
+                                          addSubtask(curr, task.id, subtaskDraft)
+                                        );
+                                        setSubtaskDraft('');
+                                      }}
+                                    >
+                                      <input
+                                        type="text"
+                                        class="capture-input"
+                                        style={{
+                                          padding: '0.25rem 0.45rem',
+                                          fontSize: '0.82rem',
+                                        }}
+                                        placeholder="Add subtask (press Enter)..."
+                                        value={subtaskDraft}
+                                        onInput={(e) =>
+                                          setSubtaskDraft(
+                                            (e.target as HTMLInputElement).value
+                                          )
+                                        }
+                                      />
+                                      <button
+                                        type="submit"
+                                        class="btn btn-sm btn-primary"
+                                      >
+                                        + Subtask
+                                      </button>
+                                    </form>
+                                  </div>
+                                )}
                               </div>
                             </div>
 
@@ -954,53 +1231,259 @@ export function App() {
                 No active Q2 tasks. Add one above with <code>#q2</code>.
               </div>
             ) : (
-              q2Tasks.map((task) => (
-                <div
-                  key={task.id}
-                  class="task-item"
-                  style={{
-                    borderColor:
-                      task.id === selectedFocusTaskId ? 'var(--q2-color)' : undefined,
-                  }}
-                >
-                  <div class="task-left">
-                    <input
-                      type="checkbox"
-                      class="task-checkbox"
-                      checked={task.completed}
-                      onChange={() => handleToggleComplete(task)}
-                    />
-                    <div class="task-body">
-                      <div class="task-title">{task.title}</div>
-                      <div class="task-meta">
-                        {task.dueDate && (
-                          <span class="tag-chip">{task.dueDate}</span>
-                        )}
-                        {task.focusMinutesLogged > 0 && (
-                          <span class="tag-chip tag-q2-focus">
-                            {task.focusMinutesLogged}m logged
-                          </span>
+              q2Tasks.map((task) => {
+                const totalChecklist = task.checklist?.length || 0;
+                const doneChecklist =
+                  task.checklist?.filter((s) => s.done).length || 0;
+                const checklistPct =
+                  totalChecklist > 0
+                    ? Math.round((doneChecklist / totalChecklist) * 100)
+                    : 0;
+
+                return (
+                  <div
+                    key={task.id}
+                    class="task-item"
+                    style={{
+                      borderColor:
+                        task.id === selectedFocusTaskId
+                          ? 'var(--q2-color)'
+                          : undefined,
+                    }}
+                  >
+                    <div class="task-left">
+                      <input
+                        type="checkbox"
+                        class="task-checkbox"
+                        checked={task.completed}
+                        onChange={() => handleToggleComplete(task)}
+                        aria-label={`Complete "${task.title}"`}
+                      />
+                      <div
+                        class="task-body"
+                        onClick={() =>
+                          setExpandedTaskId(
+                            expandedTaskId === task.id ? null : task.id
+                          )
+                        }
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <div class="task-title" title="Click to expand/edit">
+                          {task.title}
+                        </div>
+                        <div class="task-meta">
+                          {totalChecklist > 0 && (
+                            <>
+                              <span class="tag-chip">
+                                ✓ {doneChecklist}/{totalChecklist}
+                              </span>
+                              <span
+                                class="subtask-progress-mini"
+                                title={`${checklistPct}% completed`}
+                              >
+                                <span
+                                  class="subtask-progress-bar"
+                                  style={{ width: `${checklistPct}%` }}
+                                />
+                              </span>
+                            </>
+                          )}
+                          {task.focusMinutesLogged > 0 && (
+                            <span class="tag-chip tag-q2-focus">
+                              {task.focusMinutesLogged}m logged
+                            </span>
+                          )}
+                          {task.dueDate && (
+                            <span class="tag-chip">{task.dueDate}</span>
+                          )}
+                          {task.estimatedMinutes && (
+                            <span class="tag-chip">
+                              ~{task.estimatedMinutes}m
+                            </span>
+                          )}
+                        </div>
+
+                        {expandedTaskId === task.id && (
+                          <div
+                            class="task-drawer-inline"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ cursor: 'default' }}
+                          >
+                            <div class="task-edit-row">
+                              <input
+                                type="text"
+                                class="capture-input"
+                                style={{
+                                  padding: '0.25rem 0.45rem',
+                                  fontSize: '0.82rem',
+                                }}
+                                placeholder="Task title..."
+                                defaultValue={task.title}
+                                onBlur={(e) => {
+                                  const val = (e.target as HTMLInputElement).value.trim();
+                                  if (val && val !== task.title) {
+                                    setState((curr) =>
+                                      updateTaskDetails(curr, task.id, {
+                                        title: val,
+                                      })
+                                    );
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const val = (e.currentTarget as HTMLInputElement).value.trim();
+                                    if (val && val !== task.title) {
+                                      setState((curr) =>
+                                        updateTaskDetails(curr, task.id, {
+                                          title: val,
+                                        })
+                                      );
+                                    }
+                                    (e.currentTarget as HTMLInputElement).blur();
+                                  }
+                                }}
+                              />
+                              <input
+                                type="date"
+                                class="capture-date"
+                                aria-label="Due Date"
+                                value={task.dueDate || ''}
+                                onInput={(e) => {
+                                  const val = (e.target as HTMLInputElement).value;
+                                  setState((curr) =>
+                                    updateTaskDetails(curr, task.id, {
+                                      dueDate: val || undefined,
+                                    })
+                                  );
+                                }}
+                              />
+                              <input
+                                type="text"
+                                class="capture-input"
+                                style={{
+                                  padding: '0.25rem 0.45rem',
+                                  fontSize: '0.82rem',
+                                }}
+                                placeholder="Notes..."
+                                value={task.notes || ''}
+                                onInput={(e) => {
+                                  const val = (e.target as HTMLInputElement).value;
+                                  setState((curr) =>
+                                    updateTaskDetails(curr, task.id, {
+                                      notes: val,
+                                    })
+                                  );
+                                }}
+                              />
+                            </div>
+
+                            {totalChecklist > 0 && (
+                              <div class="subtask-list">
+                                {(task.checklist || []).map((item) => (
+                                  <div
+                                    key={item.id}
+                                    class={`subtask-item ${item.done ? 'done' : ''}`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={item.done}
+                                      onChange={() =>
+                                        setState((curr) =>
+                                          toggleSubtask(curr, task.id, item.id)
+                                        )
+                                      }
+                                      aria-label={`Toggle subtask "${item.text}"`}
+                                    />
+                                    <span class="subtask-text">
+                                      {item.text}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      class="icon-btn"
+                                      title="Delete subtask"
+                                      onClick={() =>
+                                        setState((curr) =>
+                                          deleteSubtask(curr, task.id, item.id)
+                                        )
+                                      }
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <form
+                              class="subtask-add-form"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (!subtaskDraft.trim()) return;
+                                setState((curr) =>
+                                  addSubtask(curr, task.id, subtaskDraft)
+                                );
+                                setSubtaskDraft('');
+                              }}
+                            >
+                              <input
+                                type="text"
+                                class="capture-input"
+                                style={{
+                                  padding: '0.25rem 0.45rem',
+                                  fontSize: '0.82rem',
+                                }}
+                                placeholder="Add subtask (press Enter)..."
+                                value={subtaskDraft}
+                                onInput={(e) =>
+                                  setSubtaskDraft(
+                                    (e.target as HTMLInputElement).value
+                                  )
+                                }
+                              />
+                              <button
+                                type="submit"
+                                class="btn btn-sm btn-primary"
+                              >
+                                + Subtask
+                              </button>
+                            </form>
+                          </div>
                         )}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      class={`btn btn-sm ${
+                        task.id === selectedFocusTaskId ? 'btn-q2' : ''
+                      }`}
+                      onClick={() => setSelectedFocusTaskId(task.id)}
+                    >
+                      {task.id === selectedFocusTaskId ? 'Active' : 'Select'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    class={`btn btn-sm ${
-                      task.id === selectedFocusTaskId ? 'btn-q2' : ''
-                    }`}
-                    onClick={() => setSelectedFocusTaskId(task.id)}
-                  >
-                    {task.id === selectedFocusTaskId ? 'Active' : 'Select'}
-                  </button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
       )}
 
-      {/* VIEW 4: GIST SYNC & CS LAB */}
+      {/* VIEW 4: BORON & COVEY ANALYTICS */}
+      {viewMode === 'ANALYTICS' && (
+        <div class="analytics-grid">
+          {ANALYTICS_WIDGET_REGISTRY.map((widget) => (
+            <div
+              key={widget.id}
+              style={{ gridColumn: widget.spanFull ? '1 / -1' : undefined }}
+            >
+              {widget.render({ state, analytics })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* VIEW 5: GIST SYNC & CS LAB */}
       {viewMode === 'SYNC_LAB' && (
         <div class="panel-grid">
           <div class="panel-card">
@@ -1037,6 +1520,30 @@ export function App() {
               />
             </div>
 
+            <div class="form-group">
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  cursor: 'pointer',
+                  fontSize: '0.82rem',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={gistConfig.autoSync}
+                  onChange={(e) =>
+                    setGistConfig((prev) => ({
+                      ...prev,
+                      autoSync: (e.target as HTMLInputElement).checked,
+                    }))
+                  }
+                />
+                Automatic background sync (changes, reconnect, tab focus)
+              </label>
+            </div>
+
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -1053,6 +1560,13 @@ export function App() {
                 onClick={handleCreateSecretGist}
               >
                 Create Secret Gist
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                onClick={() => setGistConfig(clearGistToken())}
+              >
+                Disconnect Token
               </button>
             </div>
 

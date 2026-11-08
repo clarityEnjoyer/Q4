@@ -3,6 +3,7 @@ import {
   ConcurrentTaskValue,
   FocusSession,
   LogicalClock,
+  SubtaskItem,
   TaskItem,
 } from './types';
 
@@ -49,13 +50,17 @@ function toConcurrentValue(t: TaskItem): ConcurrentTaskValue {
     dueDate: t.dueDate,
     estimatedMinutes: t.estimatedMinutes,
     tags: [...(t.tags || [])].sort(),
+    checklist: t.checklist ? t.checklist.map((s) => ({ ...s })) : undefined,
     clock: t.clock,
   };
 }
 
 function contentSignature(v: ConcurrentTaskValue): string {
   const tagsStr = [...(v.tags || [])].sort().join(',');
-  return `${v.title}|${v.notes || ''}|${v.quadrant}|${v.completed}|${v.dueDate || ''}|${v.estimatedMinutes || ''}|${tagsStr}`;
+  const checklistStr = (v.checklist || [])
+    .map((s) => `${s.id}:${s.done ? 1 : 0}:${s.text}`)
+    .join('^');
+  return `${v.title}|${v.notes || ''}|${v.quadrant}|${v.completed}|${v.dueDate || ''}|${v.estimatedMinutes || ''}|${tagsStr}|${checklistStr}`;
 }
 
 function concurrentValueSignature(v: ConcurrentTaskValue): string {

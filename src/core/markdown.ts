@@ -22,6 +22,11 @@ export function serializeToMarkdown(state: AppState, now: Date = new Date()): st
     lines.push('## Inbox');
     for (const t of inboxTasks) {
       lines.push(formatTaskMarkdownLine(t));
+      if (t.checklist) {
+        for (const sub of t.checklist) {
+          lines.push(`  - [${sub.done ? 'x' : ' '}] ${sub.text}`);
+        }
+      }
     }
     lines.push('');
   }
@@ -34,6 +39,11 @@ export function serializeToMarkdown(state: AppState, now: Date = new Date()): st
     lines.push(`## ${meta.title}`);
     for (const t of active) {
       lines.push(formatTaskMarkdownLine(t));
+      if (t.checklist) {
+        for (const sub of t.checklist) {
+          lines.push(`  - [${sub.done ? 'x' : ' '}] ${sub.text}`);
+        }
+      }
     }
     lines.push('');
   }
@@ -46,6 +56,11 @@ export function serializeToMarkdown(state: AppState, now: Date = new Date()): st
     lines.push('## Completed');
     for (const t of completedTasks.slice(0, 15)) {
       lines.push(formatTaskMarkdownLine(t, true));
+      if (t.checklist) {
+        for (const sub of t.checklist) {
+          lines.push(`  - [${sub.done ? 'x' : ' '}] ${sub.text}`);
+        }
+      }
     }
   }
 
@@ -57,12 +72,8 @@ function formatTaskMarkdownLine(t: TaskItem, includeQuadrantBadge = false): stri
   const qBadge = includeQuadrantBadge ? `[${t.quadrant}] ` : '';
   const due = t.dueDate ? ` due:${t.dueDate}` : '';
   const est = t.estimatedMinutes ? ` ~${t.estimatedMinutes}m` : '';
-  const tags =
-    t.tags && t.tags.length > 0
-      ? ' ' + t.tags.map((tag) => `+${tag}`).join(' ')
-      : '';
 
-  return `- ${checkbox} ${qBadge}${t.title}${due}${est}${tags}`;
+  return `- ${checkbox} ${qBadge}${t.title}${due}${est}`;
 }
 
 export function parseMarkdownTaskLines(markdown: string): Array<{
