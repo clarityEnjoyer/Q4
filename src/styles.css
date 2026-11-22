@@ -2900,6 +2900,12 @@ dialog::backdrop {
   border-color: var(--inbox-color);
 }
 
+.mobile-quadrant-pill.drop-active {
+  border-color: var(--inbox-color);
+  outline: 2px dashed var(--inbox-color);
+  outline-offset: -2px;
+}
+
 /* Mobile Shell, Thumb Navigation & Card Polish */
 @media (max-width: 640px) {
   .desktop-only-control {
@@ -2945,8 +2951,9 @@ dialog::backdrop {
     min-width: 0;
     flex: 1;
     min-block-size: 46px;
-    padding: 0.4rem 0.25rem;
-    font-size: 0.82rem;
+    padding: 0.4rem 0.2rem;
+    gap: 0.25rem;
+    font-size: 0.78rem;
   }
   .nav-tab[aria-current="page"]::after {
     top: 0;
@@ -2979,11 +2986,17 @@ dialog::backdrop {
     opacity: 0.72;
   }
   .task-item {
-    padding: 0.45rem 0.55rem 0.45rem 0.25rem;
+    padding: 0.45rem 0.55rem;
     align-items: center;
   }
   .task-checkbox {
     margin-top: 0;
+  }
+}
+
+@media (max-width: 640px) and (pointer: coarse) {
+  .task-item {
+    padding-left: 0.25rem;
   }
 }
 

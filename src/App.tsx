@@ -60,38 +60,42 @@ interface EditingTargetState {
   anchorRect: DOMRect;
 }
 
-const MOBILE_MEDIA_QUERY = '(max-width: 640px)';
+const NARROW_MEDIA_QUERY = '(max-width: 640px)';
+const TOUCH_MEDIA_QUERY = '(pointer: coarse)';
+const PHONE_MEDIA_QUERY = '(max-width: 640px) and (pointer: coarse)';
 
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState<boolean>(() => {
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState<boolean>(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return false;
     }
-    return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+    return window.matchMedia(query).matches;
   });
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return;
     }
-    const mql = window.matchMedia(MOBILE_MEDIA_QUERY);
-    const sync = () => setIsMobile(mql.matches);
+    const mql = window.matchMedia(query);
+    const sync = () => setMatches(mql.matches);
     sync();
     mql.addEventListener('change', sync);
     return () => mql.removeEventListener('change', sync);
-  }, []);
+  }, [query]);
 
-  return isMobile;
+  return matches;
 }
 
 export function App() {
-  const isMobile = useIsMobile();
+  const isNarrow = useMediaQuery(NARROW_MEDIA_QUERY);
+  const isTouch = useMediaQuery(TOUCH_MEDIA_QUERY);
+  const isPhone = isNarrow && isTouch;
   const [state, setState] = useState<AppState>(() => loadLocalState());
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const onPhone =
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
-      window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+      window.matchMedia(PHONE_MEDIA_QUERY).matches;
     if (onPhone) {
       return 'MATRIX';
     }
@@ -105,10 +109,10 @@ export function App() {
   });
 
   useEffect(() => {
-    if (isMobile && (viewMode === 'MORNING_Q2' || viewMode === 'FOCUS')) {
+    if (isPhone && (viewMode === 'MORNING_Q2' || viewMode === 'FOCUS')) {
       setViewMode('MATRIX');
     }
-  }, [isMobile, viewMode]);
+  }, [isPhone, viewMode]);
 
   const [visualPrefs, setVisualPrefs] = useState(() => loadVisualPrefs());
 
@@ -274,7 +278,7 @@ export function App() {
       } else if (e.key === '2') {
         e.preventDefault();
         setViewMode('TRIAGE');
-      } else if (e.key === '3' && !isMobile) {
+      } else if (e.key === '3' && !isPhone) {
         e.preventDefault();
         setViewMode('MORNING_Q2');
       } else if (e.key === '4') {
@@ -291,7 +295,7 @@ export function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isMobile, viewMode, inboxTasks, handleBinaryTriageAnswer]);
+  }, [isPhone, viewMode, inboxTasks, handleBinaryTriageAnswer]);
 
   const handleConfirmComplete = (task: TaskItem, actualMinutes?: number) => {
     const callback = completingTarget?.onDone;
@@ -480,7 +484,7 @@ export function App() {
           )}
         </button>
 
-        {!isMobile && (
+        {!isPhone && (
           <button
             type="button"
             class={`nav-tab ${
@@ -491,7 +495,8 @@ export function App() {
             }
             onClick={() => setViewMode('MORNING_Q2')}
           >
-            <span>Work Block</span>
+            <span class="nav-label-desktop">Work Block</span>
+            <span class="nav-label-mobile">Work</span>
             <span class="badge-count badge-q2">{q2TasksCount}</span>
           </button>
         )}
@@ -517,10 +522,10 @@ export function App() {
         </button>
       </nav>
 
-      {(!isMobile || viewMode === 'MATRIX') && (
+      {(!isPhone || viewMode === 'MATRIX') && (
         <CaptureBar
           captureInputRef={captureInputRef}
-          isMobile={isMobile}
+          isMobile={isPhone}
           onAddTask={(title, quadrant, options) =>
             setState((curr) => addTask(curr, title, quadrant, options))
           }
@@ -589,7 +594,8 @@ export function App() {
             onOpenTaskEditor={(taskId, anchorRect) =>
               setEditingTarget({ taskId, anchorRect })
             }
-            isMobile={isMobile}
+            isNarrow={isNarrow}
+            enableDrag={!isTouch}
           />
         )}
 
@@ -602,11 +608,11 @@ export function App() {
             onResetStep={() => setTriageStepChoice(null)}
             onGoMatrix={() => setViewMode('MATRIX')}
             onGoWorkBlock={() => setViewMode('MORNING_Q2')}
-            isMobile={isMobile}
+            isMobile={isPhone}
           />
         )}
 
-        {!isMobile && (viewMode === 'MORNING_Q2' || viewMode === 'FOCUS') && (
+        {!isPhone && (viewMode === 'MORNING_Q2' || viewMode === 'FOCUS') && (
           <WorkBlockView
             state={state}
             focusRequestTaskId={focusRequestTaskId}
@@ -670,7 +676,7 @@ export function App() {
                 return next;
               })
             }
-            isMobile={isMobile}
+            isMobile={isNarrow}
             visualPrefs={visualPrefs}
             onUpdateVisualPrefs={setVisualPrefs}
           />
@@ -680,7 +686,7 @@ export function App() {
       <TaskEditorPopover
         task={editingTask}
         anchorRect={editingTarget?.anchorRect ?? null}
-        isMobile={isMobile}
+        isMobile={isPhone}
         onClose={() => setEditingTarget(null)}
         onUpdateDetails={(taskId, patch) =>
           setState((curr) => updateTaskDetails(curr, taskId, patch))

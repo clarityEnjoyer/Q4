@@ -21,7 +21,8 @@ export interface MatrixViewProps {
   onFocusTask: (taskId: string) => void;
   editingTaskId: string | null;
   onOpenTaskEditor: (taskId: string, anchorRect: DOMRect) => void;
-  isMobile?: boolean;
+  isNarrow?: boolean;
+  enableDrag?: boolean;
 }
 
 const MATRIX_QUADRANTS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
@@ -51,7 +52,8 @@ export function MatrixView({
   onFocusTask,
   editingTaskId,
   onOpenTaskEditor,
-  isMobile,
+  isNarrow = false,
+  enableDrag = true,
 }: MatrixViewProps) {
   const [mobileFilter, setMobileFilter] = useState<'ALL' | Quadrant>('ALL');
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
@@ -385,7 +387,7 @@ export function MatrixView({
         : '';
 
     const isGrabbed = grabbedTaskId === task.id;
-    const maxTags = isMobile ? 2 : 4;
+    const maxTags = isNarrow ? 2 : 4;
 
     return (
       <div
@@ -395,16 +397,18 @@ export function MatrixView({
         } ${isGrabbed ? 'is-grabbed' : ''} ${
           editingTaskId === task.id ? 'is-editing' : ''
         } ${indicatorClass}`.trim()}
-        draggable={!isMobile}
-        onDragStart={!isMobile ? (e) => handleDragStart(e, task.id) : undefined}
-        onDragOver={!isMobile ? (e) => handleItemDragOver(task, e) : undefined}
-        onDrop={!isMobile ? (e) => handleItemDrop(task, e) : undefined}
-        onDragEnd={!isMobile ? handleDragEnd : undefined}
+        draggable={enableDrag}
+        onDragStart={enableDrag ? (e) => handleDragStart(e, task.id) : undefined}
+        onDragOver={enableDrag ? (e) => handleItemDragOver(task, e) : undefined}
+        onDrop={enableDrag ? (e) => handleItemDrop(task, e) : undefined}
+        onDragEnd={enableDrag ? handleDragEnd : undefined}
         onClick={
-          isMobile
+          isNarrow
             ? (e) => {
                 const target = e.target as HTMLElement | null;
-                if (target?.closest('.task-checkbox-hit, button, select, input, a')) {
+                if (
+                  target?.closest('.drag-handle, .task-checkbox-hit, button, select, input, a')
+                ) {
                   return;
                 }
                 onOpenTaskEditor(task.id, e.currentTarget.getBoundingClientRect());
@@ -414,7 +418,7 @@ export function MatrixView({
         data-task-id={task.id}
       >
         <div class="task-left">
-          {!task.completed && !isMobile && (
+          {!task.completed && enableDrag && (
             <button
               type="button"
               ref={(el) => {
@@ -453,7 +457,7 @@ export function MatrixView({
           <div
             class="task-body"
             onClick={
-              !isMobile
+              !isNarrow
                 ? (e) => {
                     const itemEl = e.currentTarget.closest('.task-item');
                     const rect = (itemEl ?? e.currentTarget).getBoundingClientRect();
@@ -461,9 +465,9 @@ export function MatrixView({
                   }
                 : undefined
             }
-            style={!isMobile ? { cursor: 'pointer' } : undefined}
+            style={!isNarrow ? { cursor: 'pointer' } : undefined}
           >
-            <div class="task-title" title={isMobile ? undefined : 'Click to edit'}>
+            <div class="task-title" title={isNarrow ? undefined : 'Click to edit'}>
               {task.title}
             </div>
 
@@ -558,7 +562,7 @@ export function MatrixView({
           </div>
         </div>
 
-        {isMobile ? (
+        {isNarrow ? (
           <span class="task-mobile-chevron" aria-hidden="true">
             ›
           </span>
@@ -611,7 +615,7 @@ export function MatrixView({
     0
   );
 
-  if (isMobile) {
+  if (isNarrow) {
     return (
       <>
         <div class="visually-hidden" aria-live="polite" aria-atomic="true">
@@ -635,9 +639,27 @@ export function MatrixView({
                 type="button"
                 class={`mobile-quadrant-pill pill-${qId} ${
                   mobileFilter === qId ? 'active' : ''
-                }`}
+                } ${enableDrag && activeDropTarget === qId ? 'drop-active' : ''}`.trim()}
                 aria-pressed={mobileFilter === qId}
                 onClick={() => setMobileFilter(qId)}
+                onDragOver={
+                  enableDrag
+                    ? (e) => {
+                        e.preventDefault();
+                        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                        setActiveDropTarget(qId);
+                      }
+                    : undefined
+                }
+                onDragLeave={
+                  enableDrag
+                    ? (e) => {
+                        e.preventDefault();
+                        setActiveDropTarget((curr) => (curr === qId ? null : curr));
+                      }
+                    : undefined
+                }
+                onDrop={enableDrag ? (e) => handleContainerDrop(qId, e) : undefined}
               >
                 {qId} ({activeCount})
               </button>
@@ -648,9 +670,27 @@ export function MatrixView({
               type="button"
               class={`mobile-quadrant-pill pill-INBOX ${
                 mobileFilter === 'INBOX' ? 'active' : ''
-              }`}
+              } ${enableDrag && activeDropTarget === 'INBOX' ? 'drop-active' : ''}`.trim()}
               aria-pressed={mobileFilter === 'INBOX'}
               onClick={() => setMobileFilter('INBOX')}
+              onDragOver={
+                enableDrag
+                  ? (e) => {
+                      e.preventDefault();
+                      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                      setActiveDropTarget('INBOX');
+                    }
+                  : undefined
+              }
+              onDragLeave={
+                enableDrag
+                  ? (e) => {
+                      e.preventDefault();
+                      setActiveDropTarget((curr) => (curr === 'INBOX' ? null : curr));
+                    }
+                  : undefined
+              }
+              onDrop={enableDrag ? (e) => handleContainerDrop('INBOX', e) : undefined}
             >
               Inbox ({displayedInboxTasks.length})
             </button>
@@ -659,7 +699,22 @@ export function MatrixView({
 
         {(mobileFilter === 'INBOX' ||
           (mobileFilter === 'ALL' && displayedInboxTasks.length > 0)) && (
-          <div class="inbox-strip" aria-label="Inbox tasks">
+          <div
+            class={`inbox-strip ${
+              enableDrag && activeDropTarget === 'INBOX'
+                ? 'drop-active drag-over drop-target-active'
+                : ''
+            }`.trim()}
+            onDragOver={enableDrag ? (e) => handleContainerDragOver('INBOX', e) : undefined}
+            onDragEnter={
+              enableDrag ? (e) => handleContainerDragEnter('INBOX', e) : undefined
+            }
+            onDragLeave={
+              enableDrag ? (e) => handleContainerDragLeave('INBOX', e) : undefined
+            }
+            onDrop={enableDrag ? (e) => handleContainerDrop('INBOX', e) : undefined}
+            aria-label={enableDrag ? 'Inbox drop target' : 'Inbox tasks'}
+          >
             <div class="inbox-strip-header">
               <div class="inbox-strip-title">
                 <span>📦</span>
@@ -696,8 +751,20 @@ export function MatrixView({
                   key={qId}
                   class={`quadrant-card quadrant-${qId} ${
                     isEmpty ? 'is-empty-mobile' : ''
-                  }`}
-                  aria-label={meta.title}
+                  } ${
+                    enableDrag && activeDropTarget === qId
+                      ? 'drop-active drag-over drop-target-active'
+                      : ''
+                  }`.trim()}
+                  onDragOver={enableDrag ? (e) => handleContainerDragOver(qId, e) : undefined}
+                  onDragEnter={
+                    enableDrag ? (e) => handleContainerDragEnter(qId, e) : undefined
+                  }
+                  onDragLeave={
+                    enableDrag ? (e) => handleContainerDragLeave(qId, e) : undefined
+                  }
+                  onDrop={enableDrag ? (e) => handleContainerDrop(qId, e) : undefined}
+                  aria-label={enableDrag ? `${meta.title} drop target` : meta.title}
                 >
                   <div class="quadrant-header">
                     <div>
@@ -722,8 +789,26 @@ export function MatrixView({
 
         {mobileFilter !== 'ALL' && mobileFilter !== 'INBOX' && (
           <section
-            class={`quadrant-card quadrant-${mobileFilter}`}
-            aria-label={QUADRANT_META[mobileFilter].title}
+            class={`quadrant-card quadrant-${mobileFilter} ${
+              enableDrag && activeDropTarget === mobileFilter
+                ? 'drop-active drag-over drop-target-active'
+                : ''
+            }`.trim()}
+            onDragOver={
+              enableDrag ? (e) => handleContainerDragOver(mobileFilter, e) : undefined
+            }
+            onDragEnter={
+              enableDrag ? (e) => handleContainerDragEnter(mobileFilter, e) : undefined
+            }
+            onDragLeave={
+              enableDrag ? (e) => handleContainerDragLeave(mobileFilter, e) : undefined
+            }
+            onDrop={enableDrag ? (e) => handleContainerDrop(mobileFilter, e) : undefined}
+            aria-label={
+              enableDrag
+                ? `${QUADRANT_META[mobileFilter].title} drop target`
+                : QUADRANT_META[mobileFilter].title
+            }
           >
             <div class="quadrant-header">
               <div>
