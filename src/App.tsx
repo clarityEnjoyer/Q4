@@ -391,25 +391,6 @@ export function App() {
       ? state.tasks[editingTarget.taskId]
       : null;
 
-  const editingSiblings = useMemo(() => {
-    if (!editingTask) return [];
-    return sortTasksInBlock(
-      Object.values(state.tasks).filter(
-        (t) =>
-          !t.deleted &&
-          t.quadrant === editingTask.quadrant &&
-          t.completed === editingTask.completed
-      )
-    );
-  }, [state.tasks, editingTask]);
-
-  const editingIndex = editingTask
-    ? editingSiblings.findIndex((t) => t.id === editingTask.id)
-    : -1;
-  const canMoveEditingUp = editingIndex > 0;
-  const canMoveEditingDown =
-    editingIndex !== -1 && editingIndex < editingSiblings.length - 1;
-
   return (
     <div class="app-shell">
       <header class="topbar">
@@ -700,23 +681,6 @@ export function App() {
         task={editingTask}
         anchorRect={editingTarget?.anchorRect ?? null}
         isMobile={isMobile}
-        canMoveUp={canMoveEditingUp}
-        canMoveDown={canMoveEditingDown}
-        onMoveTaskStep={(taskId, delta) =>
-          setState((curr) => {
-            const t = curr.tasks[taskId];
-            if (!t || t.deleted) return curr;
-            const group = sortTasksInBlock(
-              Object.values(curr.tasks).filter(
-                (x) => !x.deleted && x.quadrant === t.quadrant && x.completed === t.completed
-              )
-            );
-            const idx = group.findIndex((x) => x.id === taskId);
-            const nextIdx = idx + delta;
-            if (idx === -1 || nextIdx < 0 || nextIdx >= group.length) return curr;
-            return reorderTask(curr, taskId, t.quadrant, nextIdx);
-          })
-        }
         onClose={() => setEditingTarget(null)}
         onUpdateDetails={(taskId, patch) =>
           setState((curr) => updateTaskDetails(curr, taskId, patch))

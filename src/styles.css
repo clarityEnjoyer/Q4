@@ -899,13 +899,6 @@ code, pre, .mono {
   align-self: center;
 }
 
-.touch-reorder-btns {
-  display: none;
-  align-items: center;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-
 .task-body {
   display: flex;
   flex-direction: column;
@@ -1637,10 +1630,6 @@ dialog::backdrop {
   border-top: 1px solid var(--border-subtle);
 }
 
-.editor-footer-reorder {
-  margin-left: auto;
-}
-
 @media (max-width: 640px) {
   .task-editor-dialog[open] {
     inset: auto 0 0 0 !important;
@@ -2189,9 +2178,8 @@ dialog::backdrop {
     text-overflow: ellipsis;
   }
   .wb-sprint-card .wb-slot-dur { order: 5; }
-  .wb-sprint-card .touch-reorder-btns { order: 6; }
   .wb-sprint-card .wb-sprint-remove {
-    order: 7;
+    order: 6;
     margin-left: 0;
   }
 }
@@ -2509,9 +2497,6 @@ dialog::backdrop {
   .drag-handle {
     display: none;
   }
-  .touch-reorder-btns {
-    display: inline-flex;
-  }
   .task-checkbox-hit,
   .subtask-checkbox-hit,
   .completed-toggle-label {
@@ -2535,15 +2520,13 @@ dialog::backdrop {
   .editor-tag-remove,
   .mobile-quadrant-pill,
   .editor-quadrant-pill,
-  .quick-date-chip,
-  .touch-step-btn {
+  .quick-date-chip {
     min-block-size: var(--target-size);
   }
   .btn-icon,
   .icon-btn,
   .nav-arrow,
-  .editor-tag-remove,
-  .touch-step-btn {
+  .editor-tag-remove {
     min-inline-size: var(--target-size);
   }
   .day-cell {

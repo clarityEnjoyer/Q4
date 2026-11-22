@@ -12,9 +12,6 @@ export interface TaskEditorPopoverProps {
   task: TaskItem | null;
   anchorRect: DOMRect | null;
   isMobile?: boolean;
-  canMoveUp?: boolean;
-  canMoveDown?: boolean;
-  onMoveTaskStep?: (taskId: string, delta: -1 | 1) => void;
   onClose: () => void;
   onUpdateDetails: (
     taskId: string,
@@ -113,7 +110,6 @@ interface SubtaskRowProps {
   taskId: string;
   sub: SubtaskItem;
   index: number;
-  total: number;
   isDragging: boolean;
   dropEdge: 'before' | 'after' | null;
   handleRef: (el: HTMLButtonElement | null) => void;
@@ -122,7 +118,6 @@ interface SubtaskRowProps {
   onDrop: (index: number, e: DragEvent) => void;
   onDragEnd: () => void;
   onReorderKeyDown: (index: number, subId: string, e: KeyboardEvent) => void;
-  onMoveSubtaskStep: (fromIndex: number, delta: -1 | 1) => void;
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
   onUpdateSubtask: (
     taskId: string,
@@ -136,7 +131,6 @@ function SubtaskRow({
   taskId,
   sub,
   index,
-  total,
   isDragging,
   dropEdge,
   handleRef,
@@ -145,7 +139,6 @@ function SubtaskRow({
   onDrop,
   onDragEnd,
   onReorderKeyDown,
-  onMoveSubtaskStep,
   onToggleSubtask,
   onUpdateSubtask,
   onDeleteSubtask,
@@ -268,26 +261,6 @@ function SubtaskRow({
         {parsedMinutes !== undefined && (
           <span class="editor-subtask-minutes-badge">{parsedMinutes}m</span>
         )}
-        <div class="touch-reorder-btns">
-          <button
-            type="button"
-            class="icon-btn touch-step-btn"
-            aria-label={`Move subtask "${sub.text}" up`}
-            disabled={index <= 0}
-            onClick={() => onMoveSubtaskStep(index, -1)}
-          >
-            ↑
-          </button>
-          <button
-            type="button"
-            class="icon-btn touch-step-btn"
-            aria-label={`Move subtask "${sub.text}" down`}
-            disabled={index >= total - 1}
-            onClick={() => onMoveSubtaskStep(index, 1)}
-          >
-            ↓
-          </button>
-        </div>
         <button
           type="button"
           class="icon-btn editor-subtask-delete"
@@ -307,9 +280,6 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
     task,
     anchorRect,
     isMobile,
-    canMoveUp,
-    canMoveDown,
-    onMoveTaskStep,
     onClose,
     onUpdateDetails,
     onMoveQuadrant,
@@ -946,7 +916,6 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                     taskId={task.id}
                     sub={sub}
                     index={idx}
-                    total={checklist.length}
                     isDragging={draggingSubIdx === idx}
                     dropEdge={
                       subDropIndicator && subDropIndicator.index === idx
@@ -1027,12 +996,6 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                         }
                       }
                     }}
-                    onMoveSubtaskStep={(fromIdx, delta) => {
-                      const toIdx = fromIdx + delta;
-                      if (toIdx >= 0 && toIdx < checklist.length) {
-                        onReorderSubtask(task.id, fromIdx, toIdx);
-                      }
-                    }}
                     onToggleSubtask={onToggleSubtask}
                     onUpdateSubtask={onUpdateSubtask}
                     onDeleteSubtask={onDeleteSubtask}
@@ -1053,29 +1016,6 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
             >
               Delete
             </button>
-
-            {onMoveTaskStep && (
-              <div class="touch-reorder-btns editor-footer-reorder">
-                <button
-                  type="button"
-                  class="icon-btn touch-step-btn"
-                  aria-label="Move task up"
-                  disabled={!canMoveUp}
-                  onClick={() => onMoveTaskStep(task.id, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  class="icon-btn touch-step-btn"
-                  aria-label="Move task down"
-                  disabled={!canMoveDown}
-                  onClick={() => onMoveTaskStep(task.id, 1)}
-                >
-                  ↓
-                </button>
-              </div>
-            )}
 
             <button
               type="button"

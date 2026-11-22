@@ -1008,69 +1008,46 @@ export function WorkBlockView(props: WorkBlockViewProps) {
 
               {activeTask.checklist && activeTask.checklist.length > 0 && (
                 <div class="subtask-list">
-                  {activeTask.checklist.map((sub, subIdx) => {
-                    const totalSubs = activeTask.checklist?.length || 0;
-                    return (
-                      <div
-                        key={sub.id}
-                        class={`subtask-item ${sub.done ? 'done' : ''} ${
-                          subDragOverIndex === subIdx ? 'drag-over' : ''
-                        } ${subDragIndex === subIdx ? 'dragging' : ''}`}
-                        draggable
-                        onDragStart={(e) => handleSubtaskDragStart(subIdx, e)}
-                        onDragOver={(e) => handleSubtaskDragOver(subIdx, e)}
-                        onDragLeave={() => setSubDragOverIndex(null)}
-                        onDrop={(e) => handleSubtaskDrop(subIdx, e)}
-                        onDragEnd={handleSubtaskDragEnd}
+                  {activeTask.checklist.map((sub, subIdx) => (
+                    <div
+                      key={sub.id}
+                      class={`subtask-item ${sub.done ? 'done' : ''} ${
+                        subDragOverIndex === subIdx ? 'drag-over' : ''
+                      } ${subDragIndex === subIdx ? 'dragging' : ''}`}
+                      draggable
+                      onDragStart={(e) => handleSubtaskDragStart(subIdx, e)}
+                      onDragOver={(e) => handleSubtaskDragOver(subIdx, e)}
+                      onDragLeave={() => setSubDragOverIndex(null)}
+                      onDrop={(e) => handleSubtaskDrop(subIdx, e)}
+                      onDragEnd={handleSubtaskDragEnd}
+                    >
+                      <button
+                        type="button"
+                        class="drag-handle"
+                        aria-label={`Reorder ${sub.text} with ArrowUp or ArrowDown`}
+                        onKeyDown={(e) => handleSubtaskHandleKeyDown(subIdx, e)}
                       >
-                        <button
-                          type="button"
-                          class="drag-handle"
-                          aria-label={`Reorder ${sub.text} with ArrowUp or ArrowDown`}
-                          onKeyDown={(e) => handleSubtaskHandleKeyDown(subIdx, e)}
-                        >
-                          ⠿
-                        </button>
-                        <label class="subtask-checkbox-hit">
-                          <input
-                            id={`wb-sub-${sub.id}`}
-                            type="checkbox"
-                            checked={sub.done}
-                            onChange={() => onToggleSubtask(activeTask.id, sub.id)}
-                          />
-                        </label>
-                        <label for={`wb-sub-${sub.id}`} class="subtask-text">
-                          {sub.text}
-                        </label>
-                        {sub.estimatedMinutes !== undefined &&
-                          sub.estimatedMinutes > 0 && (
-                            <span class="wb-slot-dur mono">
-                              ~{Math.round(sub.estimatedMinutes)}m
-                            </span>
-                          )}
-                        <div class="touch-reorder-btns">
-                          <button
-                            type="button"
-                            class="icon-btn touch-step-btn"
-                            aria-label={`Move ${sub.text} up`}
-                            disabled={subIdx <= 0}
-                            onClick={() => onReorderSubtask(activeTask.id, subIdx, subIdx - 1)}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            class="icon-btn touch-step-btn"
-                            aria-label={`Move ${sub.text} down`}
-                            disabled={subIdx >= totalSubs - 1}
-                            onClick={() => onReorderSubtask(activeTask.id, subIdx, subIdx + 1)}
-                          >
-                            ↓
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        ⠿
+                      </button>
+                      <label class="subtask-checkbox-hit">
+                        <input
+                          id={`wb-sub-${sub.id}`}
+                          type="checkbox"
+                          checked={sub.done}
+                          onChange={() => onToggleSubtask(activeTask.id, sub.id)}
+                        />
+                      </label>
+                      <label for={`wb-sub-${sub.id}`} class="subtask-text">
+                        {sub.text}
+                      </label>
+                      {sub.estimatedMinutes !== undefined &&
+                        sub.estimatedMinutes > 0 && (
+                          <span class="wb-slot-dur mono">
+                            ~{Math.round(sub.estimatedMinutes)}m
+                          </span>
+                        )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -1403,27 +1380,6 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                       <span class="wb-slot-dur mono">
                         ~{slot.durationMinutes}m
                       </span>
-
-                      <div class="touch-reorder-btns">
-                        <button
-                          type="button"
-                          class="icon-btn touch-step-btn"
-                          aria-label={`Move ${slot.title} earlier`}
-                          disabled={idx <= 0}
-                          onClick={() => handleMoveSlot(idx, idx - 1)}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          class="icon-btn touch-step-btn"
-                          aria-label={`Move ${slot.title} later`}
-                          disabled={idx >= schedule.slots.length - 1}
-                          onClick={() => handleMoveSlot(idx, idx + 1)}
-                        >
-                          ↓
-                        </button>
-                      </div>
                     </div>
                   </div>
                 );
