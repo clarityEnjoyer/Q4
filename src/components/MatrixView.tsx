@@ -21,9 +21,11 @@ export interface MatrixViewProps {
   onFocusTask: (taskId: string) => void;
   editingTaskId: string | null;
   onOpenTaskEditor: (taskId: string, anchorRect: DOMRect) => void;
+  isMobile?: boolean;
 }
 
 const MATRIX_QUADRANTS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
+const MOBILE_QUADRANTS = ['Q2', 'Q1', 'Q3', 'Q4'] as const;
 
 type DropIndicatorState = {
   quadrant: Quadrant;
@@ -49,7 +51,9 @@ export function MatrixView({
   onFocusTask,
   editingTaskId,
   onOpenTaskEditor,
+  isMobile,
 }: MatrixViewProps) {
+  const [mobileFilter, setMobileFilter] = useState<'ALL' | Quadrant>('ALL');
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const draggingTaskIdRef = useRef<string | null>(null);
   const [activeDropTarget, setActiveDropTarget] = useState<Quadrant | null>(null);
@@ -381,6 +385,7 @@ export function MatrixView({
         : '';
 
     const isGrabbed = grabbedTaskId === task.id;
+    const maxTags = isMobile ? 2 : 4;
 
     return (
       <div
@@ -390,15 +395,26 @@ export function MatrixView({
         } ${isGrabbed ? 'is-grabbed' : ''} ${
           editingTaskId === task.id ? 'is-editing' : ''
         } ${indicatorClass}`.trim()}
-        draggable={true}
-        onDragStart={(e) => handleDragStart(e, task.id)}
-        onDragOver={(e) => handleItemDragOver(task, e)}
-        onDrop={(e) => handleItemDrop(task, e)}
-        onDragEnd={handleDragEnd}
+        draggable={!isMobile}
+        onDragStart={!isMobile ? (e) => handleDragStart(e, task.id) : undefined}
+        onDragOver={!isMobile ? (e) => handleItemDragOver(task, e) : undefined}
+        onDrop={!isMobile ? (e) => handleItemDrop(task, e) : undefined}
+        onDragEnd={!isMobile ? handleDragEnd : undefined}
+        onClick={
+          isMobile
+            ? (e) => {
+                const target = e.target as HTMLElement | null;
+                if (target?.closest('.task-checkbox-hit, button, select, input, a')) {
+                  return;
+                }
+                onOpenTaskEditor(task.id, e.currentTarget.getBoundingClientRect());
+              }
+            : undefined
+        }
         data-task-id={task.id}
       >
         <div class="task-left">
-          {!task.completed && (
+          {!task.completed && !isMobile && (
             <button
               type="button"
               ref={(el) => {
@@ -419,29 +435,35 @@ export function MatrixView({
               ⋮⋮
             </button>
           )}
-          <input
-            type="checkbox"
-            class="task-checkbox"
-            checked={task.completed}
-            onChange={() => {
-              if (!task.completed) {
-                onRequestComplete(task);
-              } else {
-                onUncomplete(task.id);
-              }
-            }}
-            aria-label={`Complete "${task.title}"`}
-          />
+          <label class="task-checkbox-hit" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              class="task-checkbox"
+              checked={task.completed}
+              onChange={() => {
+                if (!task.completed) {
+                  onRequestComplete(task);
+                } else {
+                  onUncomplete(task.id);
+                }
+              }}
+              aria-label={`Complete "${task.title}"`}
+            />
+          </label>
           <div
             class="task-body"
-            onClick={(e) => {
-              const itemEl = e.currentTarget.closest('.task-item');
-              const rect = (itemEl ?? e.currentTarget).getBoundingClientRect();
-              onOpenTaskEditor(task.id, rect);
-            }}
-            style={{ cursor: 'pointer' }}
+            onClick={
+              !isMobile
+                ? (e) => {
+                    const itemEl = e.currentTarget.closest('.task-item');
+                    const rect = (itemEl ?? e.currentTarget).getBoundingClientRect();
+                    onOpenTaskEditor(task.id, rect);
+                  }
+                : undefined
+            }
+            style={!isMobile ? { cursor: 'pointer' } : undefined}
           >
-            <div class="task-title" title="Click to edit">
+            <div class="task-title" title={isMobile ? undefined : 'Click to edit'}>
               {task.title}
             </div>
 
@@ -475,13 +497,13 @@ export function MatrixView({
               )}
               {task.tags && task.tags.length > 0 && (
                 <>
-                  {task.tags.slice(0, 4).map((tag) => (
+                  {task.tags.slice(0, maxTags).map((tag) => (
                     <span key={tag} class="tag-chip tag-custom">
                       {tag.startsWith('#') ? tag : `#${tag}`}
                     </span>
                   ))}
-                  {task.tags.length > 4 && (
-                    <span class="tag-chip tag-custom">+{task.tags.length - 4}</span>
+                  {task.tags.length > maxTags && (
+                    <span class="tag-chip tag-custom">+{task.tags.length - maxTags}</span>
                   )}
                 </>
               )}
@@ -515,7 +537,7 @@ export function MatrixView({
                   <strong>[{task.concurrentConflicts[0].quadrant}]</strong> “
                   {task.concurrentConflicts[0].title}”
                 </span>
-                <span style={{ display: 'flex', gap: '0.3rem' }}>
+                <span style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     class="btn btn-sm btn-primary"
@@ -536,47 +558,224 @@ export function MatrixView({
           </div>
         </div>
 
-        <div class="task-actions">
-          {task.quadrant === 'Q2' && !task.completed && (
+        {isMobile ? (
+          <span class="task-mobile-chevron" aria-hidden="true">
+            ›
+          </span>
+        ) : (
+          <div class="task-actions">
+            {task.quadrant === 'Q2' && !task.completed && (
+              <button
+                type="button"
+                class="icon-btn"
+                title="Focus on this Q2 task"
+                onClick={() => onFocusTask(task.id)}
+              >
+                ▶
+              </button>
+            )}
+            <select
+              class="icon-btn"
+              value={task.quadrant}
+              aria-label="Move Quadrant"
+              onChange={(e) =>
+                onReorderTask(
+                  task.id,
+                  (e.currentTarget as HTMLSelectElement).value as Quadrant,
+                  undefined
+                )
+              }
+            >
+              <option value="Q2">Q2</option>
+              <option value="Q1">Q1</option>
+              <option value="Q3">Q3</option>
+              <option value="Q4">Q4</option>
+              <option value="INBOX">Inbox</option>
+            </select>
             <button
               type="button"
               class="icon-btn"
-              title="Focus on this Q2 task"
-              onClick={() => onFocusTask(task.id)}
+              title="Delete task"
+              onClick={() => onDeleteTask(task.id)}
             >
-              ▶
+              ✕
             </button>
-          )}
-          <select
-            class="icon-btn"
-            value={task.quadrant}
-            aria-label="Move Quadrant"
-            onChange={(e) =>
-              onReorderTask(
-                task.id,
-                (e.currentTarget as HTMLSelectElement).value as Quadrant,
-                undefined
-              )
-            }
-          >
-            <option value="Q2">Q2</option>
-            <option value="Q1">Q1</option>
-            <option value="Q3">Q3</option>
-            <option value="Q4">Q4</option>
-            <option value="INBOX">Inbox</option>
-          </select>
-          <button
-            type="button"
-            class="icon-btn"
-            title="Delete task"
-            onClick={() => onDeleteTask(task.id)}
-          >
-            ✕
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     );
   };
+
+  const totalActiveQuadrantTasks = MATRIX_QUADRANTS.reduce(
+    (sum, q) => sum + quadrantTasks[q].filter((t) => !t.completed).length,
+    0
+  );
+
+  if (isMobile) {
+    return (
+      <>
+        <div class="visually-hidden" aria-live="polite" aria-atomic="true">
+          {liveAnnouncement}
+        </div>
+
+        <div class="mobile-quadrant-pills" role="group" aria-label="Filter quadrant">
+          <button
+            type="button"
+            class={`mobile-quadrant-pill ${mobileFilter === 'ALL' ? 'active' : ''}`}
+            aria-pressed={mobileFilter === 'ALL'}
+            onClick={() => setMobileFilter('ALL')}
+          >
+            All ({totalActiveQuadrantTasks})
+          </button>
+          {MOBILE_QUADRANTS.map((qId) => {
+            const activeCount = quadrantTasks[qId].filter((t) => !t.completed).length;
+            return (
+              <button
+                key={qId}
+                type="button"
+                class={`mobile-quadrant-pill pill-${qId} ${
+                  mobileFilter === qId ? 'active' : ''
+                }`}
+                aria-pressed={mobileFilter === qId}
+                onClick={() => setMobileFilter(qId)}
+              >
+                {qId} ({activeCount})
+              </button>
+            );
+          })}
+          {(displayedInboxTasks.length > 0 || mobileFilter === 'INBOX') && (
+            <button
+              type="button"
+              class={`mobile-quadrant-pill pill-INBOX ${
+                mobileFilter === 'INBOX' ? 'active' : ''
+              }`}
+              aria-pressed={mobileFilter === 'INBOX'}
+              onClick={() => setMobileFilter('INBOX')}
+            >
+              Inbox ({displayedInboxTasks.length})
+            </button>
+          )}
+        </div>
+
+        {(mobileFilter === 'INBOX' ||
+          (mobileFilter === 'ALL' && displayedInboxTasks.length > 0)) && (
+          <div class="inbox-strip" aria-label="Inbox tasks">
+            <div class="inbox-strip-header">
+              <div class="inbox-strip-title">
+                <span>📦</span>
+                <strong>Inbox</strong>
+                <span class="pill">{inboxCount}</span>
+              </div>
+              {inboxCount > 0 && (
+                <button type="button" class="btn btn-primary btn-sm" onClick={onGoTriage}>
+                  Triage Now →
+                </button>
+              )}
+            </div>
+
+            {displayedInboxTasks.length === 0 ? (
+              <div class="inbox-empty-hint">Inbox clear</div>
+            ) : (
+              <div class="task-list">
+                {displayedInboxTasks.map((task) => renderTaskCard(task))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {mobileFilter === 'ALL' && (
+          <div class="matrix-grid">
+            {MOBILE_QUADRANTS.map((qId) => {
+              const meta = QUADRANT_META[qId];
+              const qTasks = quadrantTasks[qId];
+              const activeCount = qTasks.filter((t) => !t.completed).length;
+              const isEmpty = qTasks.length === 0;
+
+              return (
+                <section
+                  key={qId}
+                  class={`quadrant-card quadrant-${qId} ${
+                    isEmpty ? 'is-empty-mobile' : ''
+                  }`}
+                  aria-label={meta.title}
+                >
+                  <div class="quadrant-header">
+                    <div>
+                      <div class="quadrant-title" style={{ color: meta.accentColor }}>
+                        <span>{meta.title}</span>
+                      </div>
+                      {!isEmpty && <div class="quadrant-subtitle">{meta.subtitle}</div>}
+                    </div>
+                    <span class="pill">{activeCount}</span>
+                  </div>
+
+                  {!isEmpty && (
+                    <div class="task-list">
+                      {qTasks.map((task) => renderTaskCard(task))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
+
+        {mobileFilter !== 'ALL' && mobileFilter !== 'INBOX' && (
+          <section
+            class={`quadrant-card quadrant-${mobileFilter}`}
+            aria-label={QUADRANT_META[mobileFilter].title}
+          >
+            <div class="quadrant-header">
+              <div>
+                <div
+                  class="quadrant-title"
+                  style={{ color: QUADRANT_META[mobileFilter].accentColor }}
+                >
+                  <span>{QUADRANT_META[mobileFilter].title}</span>
+                </div>
+                <div class="quadrant-subtitle">
+                  {QUADRANT_META[mobileFilter].subtitle}
+                </div>
+              </div>
+              <span class="pill">
+                {quadrantTasks[mobileFilter].filter((t) => !t.completed).length}
+              </span>
+            </div>
+
+            <div class="task-list">
+              {quadrantTasks[mobileFilter].length === 0 ? (
+                <div
+                  style={{
+                    padding: '1rem',
+                    textAlign: 'center',
+                    color: 'var(--text-dim)',
+                    fontSize: '0.84rem',
+                  }}
+                >
+                  Empty
+                </div>
+              ) : (
+                quadrantTasks[mobileFilter].map((task) => renderTaskCard(task))
+              )}
+            </div>
+          </section>
+        )}
+
+        <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+          <label class="completed-toggle-label">
+            <input
+              type="checkbox"
+              checked={showCompleted}
+              onChange={(e) =>
+                onToggleShowCompleted((e.currentTarget as HTMLInputElement).checked)
+              }
+            />
+            Show completed tasks
+          </label>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -666,14 +865,7 @@ export function MatrixView({
       </div>
 
       <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-        <label
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            cursor: 'pointer',
-          }}
-        >
+        <label class="completed-toggle-label">
           <input
             type="checkbox"
             checked={showCompleted}

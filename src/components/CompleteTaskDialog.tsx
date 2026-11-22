@@ -192,6 +192,8 @@ export function CompleteTaskDialog(props: CompleteTaskDialogProps) {
             type="number"
             step="any"
             min="0"
+            inputMode="decimal"
+            enterKeyHint="done"
             class="capture-input capture-hours-input"
             placeholder="Hours (e.g. 0.25)"
             value={hoursInput}

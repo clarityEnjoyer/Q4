@@ -643,6 +643,11 @@ export function WorkBlockView(props: WorkBlockViewProps) {
     setDragOverIndex(null);
   };
 
+  const handleMoveSlot = (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= queue.length || fromIndex === toIndex) return;
+    setQueue((prev) => moveWorkBlockItem(prev, fromIndex, toIndex));
+  };
+
   const handleHandleKeyDown = (
     index: number,
     e: JSX.TargetedKeyboardEvent<HTMLButtonElement>
@@ -650,11 +655,11 @@ export function WorkBlockView(props: WorkBlockViewProps) {
     const btn = e.currentTarget;
     if (e.key === 'ArrowUp' && index > 0) {
       e.preventDefault();
-      setQueue((prev) => moveWorkBlockItem(prev, index, index - 1));
+      handleMoveSlot(index, index - 1);
       requestAnimationFrame(() => btn.focus({ preventScroll: true }));
     } else if (e.key === 'ArrowDown' && index < queue.length - 1) {
       e.preventDefault();
-      setQueue((prev) => moveWorkBlockItem(prev, index, index + 1));
+      handleMoveSlot(index, index + 1);
       requestAnimationFrame(() => btn.focus({ preventScroll: true }));
     }
   };
@@ -903,12 +908,6 @@ export function WorkBlockView(props: WorkBlockViewProps) {
             Slot {currentIndex + 1} of {queue.length}
           </span>
 
-          <progress
-            class="wb-focus-progress"
-            max={Math.max(1, queue.length)}
-            value={currentIndex + 1}
-          />
-
           <button
             type="button"
             class="btn btn-sm btn-icon"
@@ -918,6 +917,12 @@ export function WorkBlockView(props: WorkBlockViewProps) {
           >
             {soundEnabled ? '🔔' : '🔕'}
           </button>
+
+          <progress
+            class="wb-focus-progress"
+            max={Math.max(1, queue.length)}
+            value={currentIndex + 1}
+          />
         </div>
 
         <div class={`wb-focus-card ${!isTaskSlot ? 'is-rest' : ''}`}>
@@ -957,6 +962,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
+                      if (e.isComposing || e.keyCode === 229) return;
                       if (!subtaskDraft.trim()) return;
                       subtaskHoursRef.current?.focus();
                       subtaskHoursRef.current?.select();
@@ -969,6 +975,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                     type="number"
                     step="any"
                     min="0"
+                    inputMode="decimal"
                     enterKeyHint="done"
                     class="capture-input capture-hours-input wb-hours-input"
                     placeholder="Hours (e.g. 0.25)"
@@ -983,6 +990,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                       }
                       if (e.key === 'Enter') {
                         e.preventDefault();
+                        if (e.isComposing || e.keyCode === 229) return;
                         submitSubtaskDraft();
                       }
                     }}
@@ -1000,44 +1008,69 @@ export function WorkBlockView(props: WorkBlockViewProps) {
 
               {activeTask.checklist && activeTask.checklist.length > 0 && (
                 <div class="subtask-list">
-                  {activeTask.checklist.map((sub, subIdx) => (
-                    <div
-                      key={sub.id}
-                      class={`subtask-item ${sub.done ? 'done' : ''} ${
-                        subDragOverIndex === subIdx ? 'drag-over' : ''
-                      } ${subDragIndex === subIdx ? 'dragging' : ''}`}
-                      draggable
-                      onDragStart={(e) => handleSubtaskDragStart(subIdx, e)}
-                      onDragOver={(e) => handleSubtaskDragOver(subIdx, e)}
-                      onDragLeave={() => setSubDragOverIndex(null)}
-                      onDrop={(e) => handleSubtaskDrop(subIdx, e)}
-                      onDragEnd={handleSubtaskDragEnd}
-                    >
-                      <button
-                        type="button"
-                        class="drag-handle"
-                        aria-label={`Reorder ${sub.text} with ArrowUp or ArrowDown`}
-                        onKeyDown={(e) => handleSubtaskHandleKeyDown(subIdx, e)}
+                  {activeTask.checklist.map((sub, subIdx) => {
+                    const totalSubs = activeTask.checklist?.length || 0;
+                    return (
+                      <div
+                        key={sub.id}
+                        class={`subtask-item ${sub.done ? 'done' : ''} ${
+                          subDragOverIndex === subIdx ? 'drag-over' : ''
+                        } ${subDragIndex === subIdx ? 'dragging' : ''}`}
+                        draggable
+                        onDragStart={(e) => handleSubtaskDragStart(subIdx, e)}
+                        onDragOver={(e) => handleSubtaskDragOver(subIdx, e)}
+                        onDragLeave={() => setSubDragOverIndex(null)}
+                        onDrop={(e) => handleSubtaskDrop(subIdx, e)}
+                        onDragEnd={handleSubtaskDragEnd}
                       >
-                        ⠿
-                      </button>
-                      <input
-                        id={`wb-sub-${sub.id}`}
-                        type="checkbox"
-                        checked={sub.done}
-                        onChange={() => onToggleSubtask(activeTask.id, sub.id)}
-                      />
-                      <label for={`wb-sub-${sub.id}`} class="subtask-text">
-                        {sub.text}
-                      </label>
-                      {sub.estimatedMinutes !== undefined &&
-                        sub.estimatedMinutes > 0 && (
-                          <span class="wb-slot-dur mono">
-                            ~{Math.round(sub.estimatedMinutes)}m
-                          </span>
-                        )}
-                    </div>
-                  ))}
+                        <button
+                          type="button"
+                          class="drag-handle"
+                          aria-label={`Reorder ${sub.text} with ArrowUp or ArrowDown`}
+                          onKeyDown={(e) => handleSubtaskHandleKeyDown(subIdx, e)}
+                        >
+                          ⠿
+                        </button>
+                        <label class="subtask-checkbox-hit">
+                          <input
+                            id={`wb-sub-${sub.id}`}
+                            type="checkbox"
+                            checked={sub.done}
+                            onChange={() => onToggleSubtask(activeTask.id, sub.id)}
+                          />
+                        </label>
+                        <label for={`wb-sub-${sub.id}`} class="subtask-text">
+                          {sub.text}
+                        </label>
+                        {sub.estimatedMinutes !== undefined &&
+                          sub.estimatedMinutes > 0 && (
+                            <span class="wb-slot-dur mono">
+                              ~{Math.round(sub.estimatedMinutes)}m
+                            </span>
+                          )}
+                        <div class="touch-reorder-btns">
+                          <button
+                            type="button"
+                            class="icon-btn touch-step-btn"
+                            aria-label={`Move ${sub.text} up`}
+                            disabled={subIdx <= 0}
+                            onClick={() => onReorderSubtask(activeTask.id, subIdx, subIdx - 1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            class="icon-btn touch-step-btn"
+                            aria-label={`Move ${sub.text} down`}
+                            disabled={subIdx >= totalSubs - 1}
+                            onClick={() => onReorderSubtask(activeTask.id, subIdx, subIdx + 1)}
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1176,6 +1209,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
               type="number"
               step="any"
               min="0.1"
+              inputMode="decimal"
               class="capture-input wb-hours-input"
               value={customHoursInput}
               onInput={handleCustomHoursChange}
@@ -1339,33 +1373,58 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                     onDrop={(e) => handleDrop(idx, e)}
                     onDragEnd={handleDragEnd}
                   >
-                    <button
-                      type="button"
-                      class="drag-handle"
-                      aria-label={`Reorder ${slot.title} with ArrowUp or ArrowDown`}
-                      onKeyDown={(e) => handleHandleKeyDown(idx, e)}
-                    >
-                      ⠿
-                    </button>
+                    <div class="wb-sprint-main">
+                      <button
+                        type="button"
+                        class="drag-handle"
+                        aria-label={`Reorder ${slot.title} with ArrowUp or ArrowDown`}
+                        onKeyDown={(e) => handleHandleKeyDown(idx, e)}
+                      >
+                        ⠿
+                      </button>
 
-                    <span class="wb-slot-time mono">{timeRange}</span>
+                      <span class="wb-slot-title">{slot.title}</span>
 
-                    <span class={`quadrant-pill pill-${quad}`}>{quad}</span>
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-icon btn-danger-ghost wb-sprint-remove"
+                        aria-label={`Remove ${slot.title}`}
+                        onClick={() => handleRemoveSlot(idx)}
+                      >
+                        ×
+                      </button>
+                    </div>
 
-                    <span class="wb-slot-title">{slot.title}</span>
+                    <div class="wb-sprint-meta">
+                      <span class="wb-slot-time mono">{timeRange}</span>
 
-                    <span class="wb-slot-dur mono">
-                      ~{slot.durationMinutes}m
-                    </span>
+                      <span class={`quadrant-pill pill-${quad}`}>{quad}</span>
 
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-icon btn-danger-ghost"
-                      aria-label={`Remove ${slot.title}`}
-                      onClick={() => handleRemoveSlot(idx)}
-                    >
-                      ×
-                    </button>
+                      <span class="wb-slot-dur mono">
+                        ~{slot.durationMinutes}m
+                      </span>
+
+                      <div class="touch-reorder-btns">
+                        <button
+                          type="button"
+                          class="icon-btn touch-step-btn"
+                          aria-label={`Move ${slot.title} earlier`}
+                          disabled={idx <= 0}
+                          onClick={() => handleMoveSlot(idx, idx - 1)}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          class="icon-btn touch-step-btn"
+                          aria-label={`Move ${slot.title} later`}
+                          disabled={idx >= schedule.slots.length - 1}
+                          onClick={() => handleMoveSlot(idx, idx + 1)}
+                        >
+                          ↓
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 );
               })}

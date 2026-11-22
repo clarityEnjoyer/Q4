@@ -242,6 +242,7 @@ export const ANALYTICS_WIDGET_REGISTRY: AnalyticsWidget[] = [
               <div
                 style={{
                   display: 'flex',
+                  flexWrap: 'wrap',
                   alignItems: 'center',
                   gap: '0.55rem',
                 }}
@@ -524,8 +525,10 @@ export const ANALYTICS_WIDGET_REGISTRY: AnalyticsWidget[] = [
           <div
             style={{
               display: 'flex',
+              flexWrap: 'wrap',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: '0.5rem',
             }}
           >
             <div>
@@ -598,13 +601,7 @@ export const ANALYTICS_WIDGET_REGISTRY: AnalyticsWidget[] = [
               <span>Past 14 Days Activity</span>
               <span>Today →</span>
             </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(14, 1fr)',
-                gap: '0.3rem',
-              }}
-            >
+            <div class="analytics-heatmap-14">
               {last14.map((day, idx) => {
                 const isActive = day.q2Minutes > 0 || day.completedQ2Count > 0;
                 const isToday = idx === last14.length - 1;
@@ -672,8 +669,10 @@ export const ANALYTICS_WIDGET_REGISTRY: AnalyticsWidget[] = [
           <div
             style={{
               display: 'flex',
+              flexWrap: 'wrap',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: '0.5rem',
             }}
           >
             <div>
@@ -709,13 +708,7 @@ export const ANALYTICS_WIDGET_REGISTRY: AnalyticsWidget[] = [
           </div>
 
           {/* Metric Cards Comparison */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '0.65rem',
-            }}
-          >
+          <div class="analytics-kpi-pair">
             <div
               style={{
                 background: 'var(--bg-elevated)',

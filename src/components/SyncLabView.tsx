@@ -4,6 +4,7 @@ import { addTask, BoronAnalytics } from '../core/engine';
 import { parseMarkdownTaskLines, serializeToMarkdown } from '../core/markdown';
 import { AppState, GistSyncConfig, Quadrant } from '../core/types';
 import { downloadTextFile } from '../sync/storage';
+import { DensityMode, THEME_REGISTRY } from '../visuals/themes';
 
 export interface SyncLabViewProps {
   state: AppState;
@@ -18,6 +19,14 @@ export interface SyncLabViewProps {
   onImportTasks: (
     items: Array<{ title: string; quadrant: Quadrant; completed: boolean }>
   ) => void;
+  isMobile?: boolean;
+  visualPrefs?: { themeId: string; density: DensityMode };
+  onUpdateVisualPrefs?: (
+    updater: (prev: { themeId: string; density: DensityMode }) => {
+      themeId: string;
+      density: DensityMode;
+    }
+  ) => void;
 }
 
 export function SyncLabView({
@@ -31,11 +40,17 @@ export function SyncLabView({
   onCreateSecretGist,
   onDisconnectToken,
   onImportTasks,
+  isMobile,
+  visualPrefs,
+  onUpdateVisualPrefs,
 }: SyncLabViewProps) {
   const [showMarkdownBox, setShowMarkdownBox] = useState(false);
   const [importMarkdownText, setImportMarkdownText] = useState('');
+  const [showGuide, setShowGuide] = useState(!isMobile);
+  const [showProof, setShowProof] = useState(false);
 
   const semilatticeProof = useMemo(() => {
+    if (!showProof) return null;
     const replicaLaptop = addTask(
       { ...state, nodeId: 'laptop_mimuw' },
       'Simulated offline laptop edit #q2'
@@ -45,7 +60,7 @@ export function SyncLabView({
       'Simulated offline phone edit #q3'
     );
     return verifySemilatticeLaws(state, replicaLaptop, replicaPhone);
-  }, [state]);
+  }, [showProof, state]);
 
   return (
     <div class="panel-grid">
@@ -218,7 +233,7 @@ export function SyncLabView({
               <input
                 type="text"
                 class="capture-input"
-                style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem' }}
+                style={{ padding: '0.35rem 0.6rem' }}
                 placeholder="- [ ] Task title #q2"
                 value={importMarkdownText}
                 onInput={(e) =>
@@ -243,69 +258,147 @@ export function SyncLabView({
         )}
       </div>
 
+      {isMobile && visualPrefs && onUpdateVisualPrefs && (
+        <div class="panel-card">
+          <h3>Appearance</h3>
+          <div class="form-group">
+            <label for="mobile-theme-select">Theme</label>
+            <select
+              id="mobile-theme-select"
+              class="capture-select"
+              value={visualPrefs.themeId}
+              onChange={(e) =>
+                onUpdateVisualPrefs((prev) => ({
+                  ...prev,
+                  themeId: (e.currentTarget as HTMLSelectElement).value,
+                }))
+              }
+            >
+              {THEME_REGISTRY.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Layout Density</label>
+            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                class={`btn btn-sm ${
+                  visualPrefs.density === 'comfortable' ? 'btn-primary' : ''
+                }`}
+                onClick={() =>
+                  onUpdateVisualPrefs((prev) => ({ ...prev, density: 'comfortable' }))
+                }
+              >
+                Comfortable
+              </button>
+              <button
+                type="button"
+                class={`btn btn-sm ${visualPrefs.density === 'compact' ? 'btn-primary' : ''}`}
+                onClick={() =>
+                  onUpdateVisualPrefs((prev) => ({ ...prev, density: 'compact' }))
+                }
+              >
+                Compact
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div class="panel-card">
-        <h3>How to Set Up Gist Sync & Network (STE-100 Guide)</h3>
-        <div
-          style={{
-            fontSize: '0.8rem',
-            color: 'var(--text-muted)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.55rem',
-          }}
-        >
-          <div>
-            <strong style={{ color: 'var(--text-main)' }}>
-              1. Create a GitHub Token (Fix Error 403)
-            </strong>
-            <div>
-              • Open GitHub <code>Settings → Developer settings → Personal access tokens</code>.
-            </div>
-            <div>
-              • <strong>Classic token (easiest):</strong> Click <code>Generate new token (classic)</code>. Check the <code>gist</code> box.
-            </div>
-            <div>
-              • <strong>Fine-grained token:</strong> Open <code>Account permissions</code> (not Repository permissions). Set <code>Gists</code> to <code>Read and write</code>.
-            </div>
-          </div>
-
-          <div>
-            <strong style={{ color: 'var(--text-main)' }}>
-              2. Initialize the Gist on Your Laptop
-            </strong>
-            <div>
-              • Paste your token into the token field. Leave <code>Secret Gist ID</code> blank.
-            </div>
-            <div>
-              • Click <code>Create Secret Gist</code>. Copy the generated Gist ID.
-            </div>
-          </div>
-
-          <div>
-            <strong style={{ color: 'var(--text-main)' }}>
-              3. Open the App on Your Phone (Network Setup)
-            </strong>
-            <div>
-              • <strong>Same Wi-Fi:</strong> Run <code>npm run dev</code> on your laptop. Open the <code>Network: http://192.168.x.x:5173</code> URL printed in your terminal on your phone.
-            </div>
-            <div>
-              • <strong>Anywhere (Mobile Data):</strong> Run <code>npm run build</code> and upload the <code>dist/</code> folder to GitHub Pages, Cloudflare Pages, or Vercel.
-            </div>
-            <div>
-              • On your phone, paste the same Token and Secret Gist ID, then click <code>Sync Now</code>.
-            </div>
-          </div>
+        <div class="panel-header-row">
+          <h3>Setup Guide & CRDT Sync</h3>
+          <button
+            type="button"
+            class="btn btn-sm disclosure-btn"
+            aria-expanded={showGuide}
+            onClick={() => setShowGuide((v) => !v)}
+          >
+            {showGuide ? 'Hide Guide' : 'Show Guide'}
+          </button>
         </div>
 
-        <div class="code-preview mono" style={{ padding: '0.55rem 0.7rem' }}>
-          {semilatticeProof.details.map((line) => (
-            <div key={line}>{line}</div>
-          ))}
-          <div>
-            Node: {state.nodeId} | Lamport: {state.maxLamport} | Q2 Ratio:{' '}
-            {analytics.q2CompletionRatio}%
+        {showGuide && (
+          <div
+            style={{
+              fontSize: '0.8rem',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.55rem',
+            }}
+          >
+            <div>
+              <strong style={{ color: 'var(--text-main)' }}>
+                1. Create a GitHub Token (Fix Error 403)
+              </strong>
+              <div>
+                • Open GitHub <code>Settings → Developer settings → Personal access tokens</code>.
+              </div>
+              <div>
+                • <strong>Classic token (easiest):</strong> Click <code>Generate new token (classic)</code>. Check the <code>gist</code> box.
+              </div>
+              <div>
+                • <strong>Fine-grained token:</strong> Open <code>Account permissions</code> (not Repository permissions). Set <code>Gists</code> to <code>Read and write</code>.
+              </div>
+            </div>
+
+            <div>
+              <strong style={{ color: 'var(--text-main)' }}>
+                2. Initialize the Gist on Your Laptop
+              </strong>
+              <div>
+                • Paste your token into the token field. Leave <code>Secret Gist ID</code> blank.
+              </div>
+              <div>
+                • Click <code>Create Secret Gist</code>. Copy the generated Gist ID.
+              </div>
+            </div>
+
+            <div>
+              <strong style={{ color: 'var(--text-main)' }}>
+                3. Open the App on Your Phone (Network Setup)
+              </strong>
+              <div>
+                • <strong>Same Wi-Fi:</strong> Run <code>npm run dev</code> on your laptop. Open the <code>Network: http://192.168.x.x:5173</code> URL printed in your terminal on your phone.
+              </div>
+              <div>
+                • <strong>Anywhere (Mobile Data):</strong> Run <code>npm run build</code> and upload the <code>dist/</code> folder to GitHub Pages, Cloudflare Pages, or Vercel.
+              </div>
+              <div>
+                • On your phone, paste the same Token and Secret Gist ID, then click <code>Sync Now</code>.
+              </div>
+            </div>
           </div>
+        )}
+
+        <div class="panel-header-row">
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            Node: <code class="mono">{state.nodeId}</code> · Lamport:{' '}
+            <code class="mono">{state.maxLamport}</code> · Q2 Ratio:{' '}
+            <code class="mono">{analytics.q2CompletionRatio}%</code>
+          </span>
+          <button
+            type="button"
+            class="btn btn-sm disclosure-btn"
+            aria-expanded={showProof}
+            onClick={() => setShowProof((v) => !v)}
+          >
+            {showProof ? 'Hide Proof' : 'Verify CRDT'}
+          </button>
         </div>
+
+        {showProof && semilatticeProof && (
+          <div class="code-preview mono" style={{ padding: '0.55rem 0.7rem' }}>
+            {semilatticeProof.details.map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

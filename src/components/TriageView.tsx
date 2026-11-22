@@ -8,6 +8,7 @@ export interface TriageViewProps {
   onResetStep: () => void;
   onGoMatrix: () => void;
   onGoWorkBlock: () => void;
+  isMobile?: boolean;
 }
 
 /**
@@ -21,6 +22,7 @@ export function TriageView({
   onResetStep,
   onGoMatrix,
   onGoWorkBlock,
+  isMobile,
 }: TriageViewProps) {
   return (
     <div class="triage-container">
@@ -36,11 +38,17 @@ export function TriageView({
           <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
             All tasks are sorted.
           </p>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.6rem' }}>
-            <button type="button" class="btn btn-q2" onClick={onGoWorkBlock}>
-              Q2 Focus
-            </button>
-            <button type="button" class="btn" onClick={onGoMatrix}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+            {!isMobile && (
+              <button type="button" class="btn btn-q2" onClick={onGoWorkBlock}>
+                Q2 Focus
+              </button>
+            )}
+            <button
+              type="button"
+              class={`btn ${isMobile ? 'btn-q2' : ''}`}
+              onClick={onGoMatrix}
+            >
               Matrix
             </button>
           </div>
@@ -118,7 +126,7 @@ export function TriageView({
                 style={{ alignSelf: 'center' }}
                 onClick={onResetStep}
               >
-                ← Back (Backspace)
+                {isMobile ? '← Back' : '← Back (Backspace)'}
               </button>
             </div>
           )}

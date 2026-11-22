@@ -60,9 +60,41 @@ interface EditingTargetState {
   anchorRect: DOMRect;
 }
 
+const MOBILE_MEDIA_QUERY = '(max-width: 640px)';
+
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const mql = window.matchMedia(MOBILE_MEDIA_QUERY);
+    const sync = () => setIsMobile(mql.matches);
+    sync();
+    mql.addEventListener('change', sync);
+    return () => mql.removeEventListener('change', sync);
+  }, []);
+
+  return isMobile;
+}
+
 export function App() {
+  const isMobile = useIsMobile();
   const [state, setState] = useState<AppState>(() => loadLocalState());
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const onPhone =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+    if (onPhone) {
+      return 'MATRIX';
+    }
     const hour = new Date().getHours();
     const initial = loadLocalState();
     const stats = computeBoronAnalytics(initial);
@@ -71,6 +103,12 @@ export function App() {
     }
     return 'MATRIX';
   });
+
+  useEffect(() => {
+    if (isMobile && (viewMode === 'MORNING_Q2' || viewMode === 'FOCUS')) {
+      setViewMode('MATRIX');
+    }
+  }, [isMobile, viewMode]);
 
   const [visualPrefs, setVisualPrefs] = useState(() => loadVisualPrefs());
 
@@ -236,7 +274,7 @@ export function App() {
       } else if (e.key === '2') {
         e.preventDefault();
         setViewMode('TRIAGE');
-      } else if (e.key === '3') {
+      } else if (e.key === '3' && !isMobile) {
         e.preventDefault();
         setViewMode('MORNING_Q2');
       } else if (e.key === '4') {
@@ -253,7 +291,7 @@ export function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [viewMode, inboxTasks, handleBinaryTriageAnswer]);
+  }, [isMobile, viewMode, inboxTasks, handleBinaryTriageAnswer]);
 
   const handleConfirmComplete = (task: TaskItem, actualMinutes?: number) => {
     const callback = completingTarget?.onDone;
@@ -346,6 +384,32 @@ export function App() {
     };
   }, [gistConfig.autoSync, gistConfig.token, gistConfig.gistId]);
 
+  const editingTask =
+    editingTarget &&
+    state.tasks[editingTarget.taskId] &&
+    !state.tasks[editingTarget.taskId].deleted
+      ? state.tasks[editingTarget.taskId]
+      : null;
+
+  const editingSiblings = useMemo(() => {
+    if (!editingTask) return [];
+    return sortTasksInBlock(
+      Object.values(state.tasks).filter(
+        (t) =>
+          !t.deleted &&
+          t.quadrant === editingTask.quadrant &&
+          t.completed === editingTask.completed
+      )
+    );
+  }, [state.tasks, editingTask]);
+
+  const editingIndex = editingTask
+    ? editingSiblings.findIndex((t) => t.id === editingTask.id)
+    : -1;
+  const canMoveEditingUp = editingIndex > 0;
+  const canMoveEditingDown =
+    editingIndex !== -1 && editingIndex < editingSiblings.length - 1;
+
   return (
     <div class="app-shell">
       <header class="topbar">
@@ -362,7 +426,7 @@ export function App() {
           </span>
 
           <select
-            class="pill"
+            class="pill desktop-only-control"
             style={{ cursor: 'pointer', appearance: 'auto' }}
             value={visualPrefs.themeId}
             aria-label="Theme Selection"
@@ -382,7 +446,7 @@ export function App() {
 
           <button
             type="button"
-            class="pill"
+            class="pill desktop-only-control"
             title="Toggle display density"
             onClick={() =>
               setVisualPrefs((prev) => ({
@@ -417,6 +481,7 @@ export function App() {
         <button
           type="button"
           class={`nav-tab ${viewMode === 'MATRIX' ? 'active' : ''}`}
+          aria-current={viewMode === 'MATRIX' ? 'page' : undefined}
           onClick={() => setViewMode('MATRIX')}
         >
           <span>Matrix</span>
@@ -425,6 +490,7 @@ export function App() {
         <button
           type="button"
           class={`nav-tab ${viewMode === 'TRIAGE' ? 'active' : ''}`}
+          aria-current={viewMode === 'TRIAGE' ? 'page' : undefined}
           onClick={() => setViewMode('TRIAGE')}
         >
           <span>Triage</span>
@@ -433,52 +499,64 @@ export function App() {
           )}
         </button>
 
-        <button
-          type="button"
-          class={`nav-tab ${
-            viewMode === 'MORNING_Q2' || viewMode === 'FOCUS' ? 'active-q2' : ''
-          }`}
-          onClick={() => setViewMode('MORNING_Q2')}
-        >
-          <span>Work Block</span>
-          <span class="badge-count badge-q2">{q2TasksCount}</span>
-        </button>
+        {!isMobile && (
+          <button
+            type="button"
+            class={`nav-tab ${
+              viewMode === 'MORNING_Q2' || viewMode === 'FOCUS' ? 'active-q2' : ''
+            }`}
+            aria-current={
+              viewMode === 'MORNING_Q2' || viewMode === 'FOCUS' ? 'page' : undefined
+            }
+            onClick={() => setViewMode('MORNING_Q2')}
+          >
+            <span>Work Block</span>
+            <span class="badge-count badge-q2">{q2TasksCount}</span>
+          </button>
+        )}
 
         <button
           type="button"
           class={`nav-tab ${viewMode === 'ANALYTICS' ? 'active' : ''}`}
+          aria-current={viewMode === 'ANALYTICS' ? 'page' : undefined}
           onClick={() => setViewMode('ANALYTICS')}
         >
-          <span>Analytics</span>
+          <span class="nav-label-desktop">Analytics</span>
+          <span class="nav-label-mobile">Stats</span>
         </button>
 
         <button
           type="button"
           class={`nav-tab ${viewMode === 'SYNC_LAB' ? 'active' : ''}`}
+          aria-current={viewMode === 'SYNC_LAB' ? 'page' : undefined}
           onClick={() => setViewMode('SYNC_LAB')}
         >
-          <span>Sync & Lab</span>
+          <span class="nav-label-desktop">Sync & Lab</span>
+          <span class="nav-label-mobile">Sync</span>
         </button>
       </nav>
 
-      <CaptureBar
-        captureInputRef={captureInputRef}
-        onAddTask={(title, quadrant, options) =>
-          setState((curr) => addTask(curr, title, quadrant, options))
-        }
-        onCalendarOpenChange={handleCalendarOpenChange}
-      />
+      {(!isMobile || viewMode === 'MATRIX') && (
+        <CaptureBar
+          captureInputRef={captureInputRef}
+          isMobile={isMobile}
+          onAddTask={(title, quadrant, options) =>
+            setState((curr) => addTask(curr, title, quadrant, options))
+          }
+          onCalendarOpenChange={handleCalendarOpenChange}
+        />
+      )}
 
       {completedQ1Crisis && (
         <form class="prevention-banner" onSubmit={handleCreatePreventiveQ2}>
           <span>
             Prevent next <strong>“{completedQ1Crisis.title}”</strong> in Q2:
           </span>
-          <div style={{ display: 'flex', gap: '0.4rem', flex: 1, minWidth: '200px' }}>
+          <div class="prevention-banner-controls">
             <input
               type="text"
               class="capture-input"
-              style={{ padding: '0.35rem 0.6rem', fontSize: '0.82rem' }}
+              style={{ padding: '0.35rem 0.6rem' }}
               placeholder="Preventive Q2 habit or task..."
               value={preventionInput}
               onInput={(e) =>
@@ -530,6 +608,7 @@ export function App() {
             onOpenTaskEditor={(taskId, anchorRect) =>
               setEditingTarget({ taskId, anchorRect })
             }
+            isMobile={isMobile}
           />
         )}
 
@@ -542,10 +621,11 @@ export function App() {
             onResetStep={() => setTriageStepChoice(null)}
             onGoMatrix={() => setViewMode('MATRIX')}
             onGoWorkBlock={() => setViewMode('MORNING_Q2')}
+            isMobile={isMobile}
           />
         )}
 
-        {(viewMode === 'MORNING_Q2' || viewMode === 'FOCUS') && (
+        {!isMobile && (viewMode === 'MORNING_Q2' || viewMode === 'FOCUS') && (
           <WorkBlockView
             state={state}
             focusRequestTaskId={focusRequestTaskId}
@@ -609,19 +689,34 @@ export function App() {
                 return next;
               })
             }
+            isMobile={isMobile}
+            visualPrefs={visualPrefs}
+            onUpdateVisualPrefs={setVisualPrefs}
           />
         )}
       </main>
 
       <TaskEditorPopover
-        task={
-          editingTarget &&
-          state.tasks[editingTarget.taskId] &&
-          !state.tasks[editingTarget.taskId].deleted
-            ? state.tasks[editingTarget.taskId]
-            : null
-        }
+        task={editingTask}
         anchorRect={editingTarget?.anchorRect ?? null}
+        isMobile={isMobile}
+        canMoveUp={canMoveEditingUp}
+        canMoveDown={canMoveEditingDown}
+        onMoveTaskStep={(taskId, delta) =>
+          setState((curr) => {
+            const t = curr.tasks[taskId];
+            if (!t || t.deleted) return curr;
+            const group = sortTasksInBlock(
+              Object.values(curr.tasks).filter(
+                (x) => !x.deleted && x.quadrant === t.quadrant && x.completed === t.completed
+              )
+            );
+            const idx = group.findIndex((x) => x.id === taskId);
+            const nextIdx = idx + delta;
+            if (idx === -1 || nextIdx < 0 || nextIdx >= group.length) return curr;
+            return reorderTask(curr, taskId, t.quadrant, nextIdx);
+          })
+        }
         onClose={() => setEditingTarget(null)}
         onUpdateDetails={(taskId, patch) =>
           setState((curr) => updateTaskDetails(curr, taskId, patch))

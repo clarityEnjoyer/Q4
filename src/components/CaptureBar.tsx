@@ -6,6 +6,7 @@ import {
   formatDateISO,
   MONTH_NAMES,
   parseDecimalHours,
+  parseQuickInput,
 } from '../core/engine';
 import { Quadrant } from '../core/types';
 
@@ -17,15 +18,17 @@ export interface CaptureBarProps {
     options: { dueDate?: string; estimatedMinutes?: number }
   ) => void;
   onCalendarOpenChange: (open: boolean) => void;
+  isMobile?: boolean;
 }
 
 /**
- * 3-step task capture bar: Title -> Decimal Hours -> Calendar Popover.
+ * Task capture bar: desktop 3-step keyboard flow; mobile 1-tap quick capture.
  */
 export function CaptureBar({
   captureInputRef,
   onAddTask,
   onCalendarOpenChange,
+  isMobile,
 }: CaptureBarProps) {
   const [captureText, setCaptureText] = useState('');
   const [captureHours, setCaptureHours] = useState('');
@@ -37,8 +40,10 @@ export function CaptureBar({
   const hoursInputRef = useRef<HTMLInputElement>(null);
   const calendarOffsetInputRef = useRef<HTMLInputElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const calToggleBtnRef = useRef<HTMLButtonElement>(null);
 
   const refocusTitle = () => {
+    if (isMobile) return;
     captureInputRef.current?.focus();
     if (typeof requestAnimationFrame !== 'undefined') {
       requestAnimationFrame(() => {
@@ -76,21 +81,23 @@ export function CaptureBar({
   // Outside click dismiss for calendar popover
   useEffect(() => {
     if (!isCalendarOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node;
+    const handleClickOutside = (e: PointerEvent) => {
+      const target = e.target as Node | null;
       if (
+        target &&
         popoverRef.current &&
         !popoverRef.current.contains(target) &&
         !captureInputRef.current?.contains(target) &&
-        !hoursInputRef.current?.contains(target)
+        !hoursInputRef.current?.contains(target) &&
+        !calToggleBtnRef.current?.contains(target)
       ) {
         setIsCalendarOpen(false);
         refocusTitle();
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isCalendarOpen, captureInputRef]);
+    document.addEventListener('pointerdown', handleClickOutside);
+    return () => document.removeEventListener('pointerdown', handleClickOutside);
+  }, [isCalendarOpen, captureInputRef, isMobile]);
 
   const calendarDays = useMemo(() => {
     const year = calendarViewDate.getFullYear();
@@ -129,7 +136,12 @@ export function CaptureBar({
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
+      if (e.isComposing || e.keyCode === 229) return;
       if (!captureText.trim()) return;
+      if (isMobile) {
+        submitTaskWithDate(undefined);
+        return;
+      }
       hoursInputRef.current?.focus();
       hoursInputRef.current?.select();
     }
@@ -139,6 +151,7 @@ export function CaptureBar({
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
+      if (e.isComposing || e.keyCode === 229) return;
       if (!captureText.trim()) {
         captureInputRef.current?.focus();
         return;
@@ -161,8 +174,11 @@ export function CaptureBar({
   const submitTaskWithDate = (dueDate?: string) => {
     const cleanTitle = captureText.trim();
     if (!cleanTitle) return;
-    const estimatedMinutes = parseDecimalHours(captureHours);
-    onAddTask(cleanTitle, captureQuadrant, {
+    const parsed = parseQuickInput(cleanTitle);
+    const finalTitle = parsed.cleanTitle || cleanTitle;
+    const estimatedMinutes =
+      parseDecimalHours(captureHours) ?? parsed.estimatedMinutes;
+    onAddTask(finalTitle, captureQuadrant, {
       dueDate: dueDate || undefined,
       estimatedMinutes,
     });
@@ -192,6 +208,7 @@ export function CaptureBar({
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
+      if (e.isComposing || e.keyCode === 229) return;
       handlePopoverSubmit();
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -227,8 +244,13 @@ export function CaptureBar({
         <input
           ref={captureInputRef}
           type="text"
+          enterKeyHint={isMobile ? 'done' : 'next'}
           class="capture-input capture-title-input"
-          placeholder="Task description... (Enter for hours, / to focus)"
+          placeholder={
+            isMobile
+              ? 'Add task (e.g. Write notes ~30m)...'
+              : 'Task description... (Enter for hours, / to focus)'
+          }
           value={captureText}
           onInput={(e) => setCaptureText((e.target as HTMLInputElement).value)}
           onKeyDown={handleTitleKeyDown}
@@ -241,6 +263,8 @@ export function CaptureBar({
             type="number"
             step="any"
             min="0"
+            inputMode="decimal"
+            enterKeyHint="done"
             class="capture-input capture-hours-input"
             placeholder="Hours (e.g. 0.25)"
             value={captureHours}
@@ -267,6 +291,28 @@ export function CaptureBar({
           <option value="Q3">Q3</option>
           <option value="Q4">Q4</option>
         </select>
+
+        {isMobile && (
+          <button
+            ref={calToggleBtnRef}
+            type="button"
+            class={`btn btn-sm capture-cal-toggle ${isCalendarOpen ? 'btn-primary' : ''}`}
+            aria-label="Pick deadline"
+            aria-expanded={isCalendarOpen}
+            onClick={() => {
+              setIsCalendarOpen((open) => {
+                const next = !open;
+                if (next) {
+                  setCalendarViewDate(new Date());
+                  setCalendarOffset('');
+                }
+                return next;
+              });
+            }}
+          >
+            📅
+          </button>
+        )}
 
         <button type="submit" class="btn btn-primary">
           Add
@@ -299,6 +345,7 @@ export function CaptureBar({
                 ref={calendarOffsetInputRef}
                 type="number"
                 min="0"
+                inputMode="numeric"
                 class="offset-input"
                 placeholder="0 = today, Enter for none"
                 value={calendarOffset}

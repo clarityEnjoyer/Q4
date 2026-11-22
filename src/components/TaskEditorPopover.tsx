@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
+  calculateOffsetDate,
   formatMinutesAsDecimalHours,
   getSubtasksEstimatedMinutes,
   parseDecimalHours,
@@ -10,6 +11,10 @@ import { closeTopLayer } from './dialogMotion';
 export interface TaskEditorPopoverProps {
   task: TaskItem | null;
   anchorRect: DOMRect | null;
+  isMobile?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveTaskStep?: (taskId: string, delta: -1 | 1) => void;
   onClose: () => void;
   onUpdateDetails: (
     taskId: string,
@@ -28,6 +33,14 @@ export interface TaskEditorPopoverProps {
   onDeleteSubtask: (taskId: string, subtaskId: string) => void;
   onReorderSubtask: (taskId: string, fromIndex: number, toIndex: number) => void;
 }
+
+const EDITOR_QUADRANTS: Array<{ id: Quadrant; label: string }> = [
+  { id: 'Q2', label: 'Q2' },
+  { id: 'Q1', label: 'Q1' },
+  { id: 'Q3', label: 'Q3' },
+  { id: 'Q4', label: 'Q4' },
+  { id: 'INBOX', label: 'Inbox' },
+];
 
 const VIEWPORT_MARGIN = 12;
 const ANCHOR_GAP = 12;
@@ -109,6 +122,7 @@ interface SubtaskRowProps {
   onDrop: (index: number, e: DragEvent) => void;
   onDragEnd: () => void;
   onReorderKeyDown: (index: number, subId: string, e: KeyboardEvent) => void;
+  onMoveSubtaskStep: (fromIndex: number, delta: -1 | 1) => void;
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
   onUpdateSubtask: (
     taskId: string,
@@ -122,6 +136,7 @@ function SubtaskRow({
   taskId,
   sub,
   index,
+  total,
   isDragging,
   dropEdge,
   handleRef,
@@ -130,6 +145,7 @@ function SubtaskRow({
   onDrop,
   onDragEnd,
   onReorderKeyDown,
+  onMoveSubtaskStep,
   onToggleSubtask,
   onUpdateSubtask,
   onDeleteSubtask,
@@ -194,13 +210,15 @@ function SubtaskRow({
       >
         ⋮⋮
       </button>
-      <input
-        type="checkbox"
-        class="editor-subtask-checkbox"
-        checked={sub.done}
-        aria-label={`Toggle subtask "${sub.text}"`}
-        onChange={() => onToggleSubtask(taskId, sub.id)}
-      />
+      <label class="subtask-checkbox-hit">
+        <input
+          type="checkbox"
+          class="editor-subtask-checkbox"
+          checked={sub.done}
+          aria-label={`Toggle subtask "${sub.text}"`}
+          onChange={() => onToggleSubtask(taskId, sub.id)}
+        />
+      </label>
       <input
         ref={textInputRef}
         type="text"
@@ -212,49 +230,74 @@ function SubtaskRow({
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
+            if (e.isComposing || e.keyCode === 229) return;
             commitText();
             (e.currentTarget as HTMLInputElement).blur();
           }
         }}
       />
-      <input
-        ref={hoursInputRef}
-        type="number"
-        step="any"
-        min="0"
-        class="editor-subtask-hours"
-        aria-label={`Subtask "${sub.text}" hours`}
-        placeholder="0.25"
-        value={hoursDraft}
-        onInput={(e) => {
-          const val = (e.currentTarget as HTMLInputElement).value;
-          setHoursDraft(val);
-          const nextMinutes = parseDecimalHours(val);
-          if ((val === '' || nextMinutes !== undefined) && nextMinutes !== sub.estimatedMinutes) {
-            onUpdateSubtask(taskId, sub.id, { estimatedMinutes: nextMinutes });
-          }
-        }}
-        onBlur={commitHours}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            commitHours();
-            (e.currentTarget as HTMLInputElement).blur();
-          }
-        }}
-      />
-      {parsedMinutes !== undefined && (
-        <span class="editor-subtask-minutes-badge">{parsedMinutes}m</span>
-      )}
-      <button
-        type="button"
-        class="icon-btn editor-subtask-delete"
-        aria-label={`Delete subtask "${sub.text}"`}
-        title="Delete subtask"
-        onClick={() => onDeleteSubtask(taskId, sub.id)}
-      >
-        ×
-      </button>
+      <div class="editor-subtask-controls">
+        <input
+          ref={hoursInputRef}
+          type="number"
+          step="any"
+          min="0"
+          inputMode="decimal"
+          class="editor-subtask-hours"
+          aria-label={`Subtask "${sub.text}" hours`}
+          placeholder="0.25"
+          value={hoursDraft}
+          onInput={(e) => {
+            const val = (e.currentTarget as HTMLInputElement).value;
+            setHoursDraft(val);
+            const nextMinutes = parseDecimalHours(val);
+            if ((val === '' || nextMinutes !== undefined) && nextMinutes !== sub.estimatedMinutes) {
+              onUpdateSubtask(taskId, sub.id, { estimatedMinutes: nextMinutes });
+            }
+          }}
+          onBlur={commitHours}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (e.isComposing || e.keyCode === 229) return;
+              commitHours();
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+        />
+        {parsedMinutes !== undefined && (
+          <span class="editor-subtask-minutes-badge">{parsedMinutes}m</span>
+        )}
+        <div class="touch-reorder-btns">
+          <button
+            type="button"
+            class="icon-btn touch-step-btn"
+            aria-label={`Move subtask "${sub.text}" up`}
+            disabled={index <= 0}
+            onClick={() => onMoveSubtaskStep(index, -1)}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            class="icon-btn touch-step-btn"
+            aria-label={`Move subtask "${sub.text}" down`}
+            disabled={index >= total - 1}
+            onClick={() => onMoveSubtaskStep(index, 1)}
+          >
+            ↓
+          </button>
+        </div>
+        <button
+          type="button"
+          class="icon-btn editor-subtask-delete"
+          aria-label={`Delete subtask "${sub.text}"`}
+          title="Delete subtask"
+          onClick={() => onDeleteSubtask(taskId, sub.id)}
+        >
+          ×
+        </button>
+      </div>
     </div>
   );
 }
@@ -263,6 +306,10 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
   const {
     task,
     anchorRect,
+    isMobile,
+    canMoveUp,
+    canMoveDown,
+    onMoveTaskStep,
     onClose,
     onUpdateDetails,
     onMoveQuadrant,
@@ -282,6 +329,8 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
   const newSubTitleRef = useRef<HTMLInputElement | null>(null);
   const newSubHoursRef = useRef<HTMLInputElement | null>(null);
   const subtaskHandleRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const dragStartYRef = useRef<number | null>(null);
+  const dragDeltaYRef = useRef<number>(0);
 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -308,6 +357,21 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
     setNewSubtaskText('');
     setNewSubtaskHours('');
     newSubTitleRef.current?.focus();
+  };
+
+  const finishSheetDrag = (commitClose: boolean) => {
+    if (dragStartYRef.current === null) return;
+    const dy = dragDeltaYRef.current;
+    dragStartYRef.current = null;
+    dragDeltaYRef.current = 0;
+    const dialog = dialogRef.current;
+    if (dialog) {
+      dialog.style.transition = '';
+      dialog.style.transform = '';
+      if (commitClose && dy > 72) {
+        void closeTopLayer(dialog);
+      }
+    }
   };
 
   const draggingSubIdxRef = useRef<number | null>(null);
@@ -418,6 +482,11 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
+    dragStartYRef.current = null;
+    dragDeltaYRef.current = 0;
+    dialog.style.transform = '';
+    dialog.style.transition = '';
+
     if (task) {
       if (!dialog.open) {
         dialog.showModal();
@@ -522,60 +591,82 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
     >
       {task && (
         <div class="task-editor-content">
-          <div class="sheet-grabber" aria-hidden="true" />
-
-          <div class="editor-header">
-            <h2 id="task-editor-heading" class="visually-hidden">
-              Edit Task
-            </h2>
-            <select
-              class="editor-quadrant-select"
-              aria-label="Quadrant"
-              value={task.quadrant}
-              onChange={(e) =>
-                onMoveQuadrant(task.id, (e.currentTarget as HTMLSelectElement).value as Quadrant)
+          <div
+            class="editor-sheet-handle"
+            onPointerDown={(e) => {
+              if (window.innerWidth > DESKTOP_BREAKPOINT) return;
+              const dialog = dialogRef.current;
+              if (!dialog || dialog.scrollTop > 0) return;
+              const target = e.target as HTMLElement | null;
+              if (target?.closest('button, input, select, textarea, a')) return;
+              dragStartYRef.current = e.clientY;
+              dragDeltaYRef.current = 0;
+              dialog.style.transition = 'none';
+              if (typeof e.currentTarget.setPointerCapture === 'function') {
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  // Ignore synthetic pointer ids without active capture
+                }
               }
-            >
-              <option value="Q2">Q2 (Important)</option>
-              <option value="Q1">Q1 (Urgent)</option>
-              <option value="Q3">Q3</option>
-              <option value="Q4">Q4</option>
-              <option value="INBOX">Inbox</option>
-            </select>
+            }}
+            onPointerMove={(e) => {
+              if (dragStartYRef.current === null) return;
+              const dialog = dialogRef.current;
+              if (!dialog) return;
+              const dy = Math.max(0, e.clientY - dragStartYRef.current);
+              dragDeltaYRef.current = dy;
+              dialog.style.transform = dy > 0 ? `translateY(${dy}px)` : '';
+            }}
+            onPointerUp={() => finishSheetDrag(true)}
+            onPointerCancel={() => finishSheetDrag(false)}
+          >
+            <div class="sheet-grabber" aria-hidden="true" />
 
-            <div class="editor-header-actions">
-              {!task.completed && (
+            <div class="editor-header">
+              <h2 id="task-editor-heading" class="visually-hidden">
+                Edit Task
+              </h2>
+              <div class="editor-quadrant-pills" role="group" aria-label="Task Quadrant">
+                {EDITOR_QUADRANTS.map((qOpt) => (
+                  <button
+                    key={qOpt.id}
+                    type="button"
+                    class={`editor-quadrant-pill pill-${qOpt.id} ${
+                      task.quadrant === qOpt.id ? 'active' : ''
+                    }`}
+                    aria-pressed={task.quadrant === qOpt.id}
+                    onClick={() => onMoveQuadrant(task.id, qOpt.id)}
+                  >
+                    {qOpt.label}
+                  </button>
+                ))}
+              </div>
+
+              <div class="editor-header-actions">
+                {!task.completed && !isMobile && (
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-q2"
+                    onClick={() => {
+                      onFocusTask(task.id);
+                      if (dialogRef.current) void closeTopLayer(dialogRef.current);
+                    }}
+                  >
+                    ▶ Focus
+                  </button>
+                )}
                 <button
                   type="button"
-                  class="btn btn-sm btn-q2"
+                  class="icon-btn editor-close-btn"
+                  aria-label="Close editor"
                   onClick={() => {
-                    onFocusTask(task.id);
                     if (dialogRef.current) void closeTopLayer(dialogRef.current);
                   }}
                 >
-                  ▶ Focus
+                  ✕
                 </button>
-              )}
-              <button
-                type="button"
-                class="btn btn-sm btn-danger-ghost"
-                onClick={() => {
-                  onDeleteTask(task.id);
-                  if (dialogRef.current) void closeTopLayer(dialogRef.current);
-                }}
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                class="icon-btn editor-close-btn"
-                aria-label="Close editor"
-                onClick={() => {
-                  if (dialogRef.current) void closeTopLayer(dialogRef.current);
-                }}
-              >
-                ✕
-              </button>
+              </div>
             </div>
           </div>
 
@@ -593,6 +684,7 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
+                if (e.isComposing || e.keyCode === 229) return;
                 commitTitle();
                 (e.currentTarget as HTMLInputElement).blur();
               }
@@ -611,6 +703,7 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                   type="number"
                   step="any"
                   min="0"
+                  inputMode="decimal"
                   class="capture-input capture-hours-input"
                   placeholder="Hours (e.g. 0.5)"
                   value={hoursDraft}
@@ -629,6 +722,7 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
+                      if (e.isComposing || e.keyCode === 229) return;
                       commitHours();
                       (e.currentTarget as HTMLInputElement).blur();
                     }
@@ -666,6 +760,25 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                     ×
                   </button>
                 )}
+              </div>
+              <div class="editor-quick-dates">
+                {[
+                  { label: 'Today', offset: 0 },
+                  { label: 'Tomorrow', offset: 1 },
+                  { label: '+7d', offset: 7 },
+                ].map((preset) => {
+                  const iso = calculateOffsetDate(preset.offset).iso;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      class={`quick-date-chip ${task.dueDate === iso ? 'active' : ''}`}
+                      onClick={() => onUpdateDetails(task.id, { dueDate: iso })}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -708,6 +821,7 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ',') {
                   e.preventDefault();
+                  if (e.isComposing || e.keyCode === 229) return;
                   commitTags(tagDraft);
                 }
               }}
@@ -778,6 +892,7 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (e.isComposing || e.keyCode === 229) return;
                     if (!newSubtaskText.trim()) return;
                     newSubHoursRef.current?.focus();
                     newSubHoursRef.current?.select();
@@ -790,6 +905,7 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                   type="number"
                   step="any"
                   min="0"
+                  inputMode="decimal"
                   enterKeyHint="done"
                   class="capture-input capture-hours-input editor-subtask-add-hours"
                   aria-label="Subtask estimated hours"
@@ -808,6 +924,7 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       e.stopPropagation();
+                      if (e.isComposing || e.keyCode === 229) return;
                       submitNewSubtask();
                     }
                   }}
@@ -910,6 +1027,12 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                         }
                       }
                     }}
+                    onMoveSubtaskStep={(fromIdx, delta) => {
+                      const toIdx = fromIdx + delta;
+                      if (toIdx >= 0 && toIdx < checklist.length) {
+                        onReorderSubtask(task.id, fromIdx, toIdx);
+                      }
+                    }}
                     onToggleSubtask={onToggleSubtask}
                     onUpdateSubtask={onUpdateSubtask}
                     onDeleteSubtask={onDeleteSubtask}
@@ -917,6 +1040,52 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                 ))}
               </div>
             )}
+          </div>
+
+          <div class="editor-footer">
+            <button
+              type="button"
+              class="btn btn-sm btn-danger-ghost"
+              onClick={() => {
+                onDeleteTask(task.id);
+                if (dialogRef.current) void closeTopLayer(dialogRef.current);
+              }}
+            >
+              Delete
+            </button>
+
+            {onMoveTaskStep && (
+              <div class="touch-reorder-btns editor-footer-reorder">
+                <button
+                  type="button"
+                  class="icon-btn touch-step-btn"
+                  aria-label="Move task up"
+                  disabled={!canMoveUp}
+                  onClick={() => onMoveTaskStep(task.id, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  class="icon-btn touch-step-btn"
+                  aria-label="Move task down"
+                  disabled={!canMoveDown}
+                  onClick={() => onMoveTaskStep(task.id, 1)}
+                >
+                  ↓
+                </button>
+              </div>
+            )}
+
+            <button
+              type="button"
+              class="btn btn-sm btn-primary"
+              onClick={() => {
+                if (dialogRef.current) void closeTopLayer(dialogRef.current);
+              }}
+            >
+              Done
+            </button>
           </div>
         </div>
       )}
