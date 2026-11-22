@@ -284,12 +284,11 @@ code, pre, .mono {
   left: 0;
   z-index: 1000;
   width: 310px;
-  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
-  backdrop-filter: blur(14px);
+  background: var(--bg-card);
   border: 1px solid var(--border-focus);
   border-radius: var(--radius);
   padding: 0.85rem;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 38px rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 14px 32px rgba(0, 0, 0, 0.52);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -1068,12 +1067,11 @@ dialog.complete-dialog,
 dialog.task-editor-dialog {
   opacity: 0;
   color: var(--text-main);
-  background: color-mix(in srgb, var(--bg-card) 94%, transparent);
-  backdrop-filter: blur(16px);
+  background: var(--bg-card);
   border: 1px solid var(--border-focus);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 22px 48px rgba(0, 0, 0, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 40px rgba(0, 0, 0, 0.56);
   transition-property: opacity, transform, display, overlay;
-  transition-duration: 0.24s;
+  transition-duration: 0.14s, 0.16s, 0.16s, 0.16s;
   transition-timing-function: ease-out;
   transition-behavior: allow-discrete;
 }
@@ -1082,9 +1080,8 @@ dialog::backdrop {
   overflow: hidden;
   overscroll-behavior: contain;
   background-color: rgba(0, 0, 0, 0);
-  backdrop-filter: blur(0px);
-  transition-property: background-color, backdrop-filter, display, overlay;
-  transition-duration: 0.24s;
+  transition-property: background-color, display, overlay;
+  transition-duration: 0.14s, 0.16s, 0.16s;
   transition-timing-function: ease-out;
   transition-behavior: allow-discrete;
 }
@@ -1094,8 +1091,7 @@ dialog::backdrop {
 }
 
 :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing]))::backdrop {
-  background-color: rgba(2, 6, 23, 0.62);
-  backdrop-filter: blur(5px);
+  background-color: rgba(2, 6, 23, 0.44);
 }
 
 @starting-style {
@@ -1104,22 +1100,35 @@ dialog::backdrop {
   }
   :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing]))::backdrop {
     background-color: rgba(0, 0, 0, 0);
-    backdrop-filter: blur(0px);
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  dialog.complete-dialog,
-  dialog.task-editor-dialog {
-    transform: scale(0.96) translateY(6px);
-    transition-timing-function: linear(0, 0.45 15%, 1.04 45%, 0.99 72%, 1);
+  dialog.complete-dialog {
+    transform: scale(0.97) translateY(4px);
+    transition-timing-function: ease-out, cubic-bezier(0.2, 0.9, 0.2, 1), ease-out, ease-out;
   }
-  :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing])) {
+  dialog.complete-dialog[open]:where(:not([data-closing])) {
     transform: scale(1) translateY(0);
   }
   @starting-style {
-    :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing])) {
-      transform: scale(0.95) translateY(8px);
+    dialog.complete-dialog[open]:where(:not([data-closing])) {
+      transform: scale(0.97) translateY(4px);
+    }
+  }
+}
+
+@media (min-width: 641px) and (prefers-reduced-motion: no-preference) {
+  dialog.task-editor-dialog {
+    transform: scale(0.97) translateY(4px);
+    transition-timing-function: ease-out, cubic-bezier(0.2, 0.9, 0.2, 1), ease-out, ease-out;
+  }
+  dialog.task-editor-dialog[open]:where(:not([data-closing])) {
+    transform: scale(1) translateY(0);
+  }
+  @starting-style {
+    dialog.task-editor-dialog[open]:where(:not([data-closing])) {
+      transform: scale(0.97) translateY(4px);
     }
   }
 }
@@ -1128,7 +1137,7 @@ dialog::backdrop {
   dialog.complete-dialog,
   dialog.task-editor-dialog,
   dialog::backdrop {
-    transition-duration: 0.12s;
+    transition-duration: 0.09s;
   }
 }
 
@@ -1351,6 +1360,9 @@ dialog::backdrop {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 0.15rem;
 }
 
 .editor-subtask-row {
@@ -1458,6 +1470,9 @@ dialog::backdrop {
     padding: 0.9rem 1rem calc(1.1rem + env(safe-area-inset-bottom));
     transform-origin: bottom center !important;
   }
+  dialog.task-editor-dialog[open]:where(:not([data-closing]))::backdrop {
+    background-color: rgba(2, 6, 23, 0.58);
+  }
   .sheet-grabber {
     display: block;
   }
@@ -1467,6 +1482,8 @@ dialog::backdrop {
   @media (prefers-reduced-motion: no-preference) {
     dialog.task-editor-dialog {
       transform: translateY(100%);
+      transition-duration: 0.14s, 0.18s, 0.18s, 0.18s;
+      transition-timing-function: ease-out, cubic-bezier(0.2, 0.9, 0.2, 1), ease-out, ease-out;
     }
     dialog.task-editor-dialog[open]:where(:not([data-closing])) {
       transform: translateY(0);
@@ -2226,14 +2243,14 @@ dialog::backdrop {
 @keyframes viewEnter {
   from {
     opacity: 0;
-    transform: translateY(5px);
+    transform: translateY(3px);
   }
 }
 
 @keyframes popoverReveal {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.97);
   }
 }
 
@@ -2243,19 +2260,19 @@ dialog::backdrop {
   .pill,
   .wb-picker-row,
   .wb-sprint-card {
-    transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    transition: background-color 0.11s ease-out, border-color 0.11s ease-out, box-shadow 0.11s ease-out, transform 0.11s ease-out;
   }
   .btn:active:not(:disabled),
   .nav-tab:active,
   .pill-sync:active,
   .wb-picker-row:active {
-    transform: scale(0.97);
+    transform: scale(0.98);
   }
   .app-shell > main > * {
-    animation: viewEnter 0.22s ease-out both;
+    animation: viewEnter 0.13s ease-out both;
   }
   .calendar-popover {
-    animation: popoverReveal 0.18s ease-out both;
+    animation: popoverReveal 0.12s ease-out both;
   }
 }
 
@@ -2455,12 +2472,23 @@ dialog::backdrop {
 .subtask-add-form {
   display: flex;
   gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .subtask-add-form .capture-input {
   flex: 1;
-  padding: 0.25rem 0.45rem;
+  min-width: 130px;
+  padding: 0.28rem 0.5rem;
   font-size: 0.82rem;
+}
+
+.subtask-add-form .wb-hours-input {
+  flex: 0 0 auto;
+  width: 112px;
+  min-width: 90px;
+  padding: 0.28rem 2.1rem 0.28rem 0.45rem;
+  font-size: 0.8rem;
 }
 
 /* Analytics View Grid */

@@ -45,14 +45,17 @@ function computeAnchoredPosition(
     dialog.style.top = '';
     dialog.style.left = '';
     dialog.style.width = '';
+    dialog.style.maxHeight = '';
     dialog.style.transformOrigin = '';
     return;
   }
 
   const width = Math.min(MAX_DESKTOP_WIDTH, vw - VIEWPORT_MARGIN * 2);
+  const maxHeight = Math.max(240, vh - VIEWPORT_MARGIN * 2);
   dialog.style.width = `${width}px`;
+  dialog.style.maxHeight = `${maxHeight}px`;
 
-  const height = dialog.offsetHeight;
+  const height = Math.min(dialog.offsetHeight || 360, maxHeight);
   const maxTop = Math.max(VIEWPORT_MARGIN, vh - height - VIEWPORT_MARGIN);
   const maxLeft = Math.max(VIEWPORT_MARGIN, vw - width - VIEWPORT_MARGIN);
 
@@ -85,9 +88,10 @@ function computeAnchoredPosition(
     }
   }
 
+  const clampedLeft = Math.min(Math.max(VIEWPORT_MARGIN, left), maxLeft);
   const clampedTop = Math.min(Math.max(VIEWPORT_MARGIN, top), maxTop);
 
-  dialog.style.left = `${Math.round(left)}px`;
+  dialog.style.left = `${Math.round(clampedLeft)}px`;
   dialog.style.top = `${Math.round(clampedTop)}px`;
   dialog.style.transformOrigin = transformOrigin;
 }
@@ -275,6 +279,8 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const hoursInputRef = useRef<HTMLInputElement | null>(null);
   const notesInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const newSubTitleRef = useRef<HTMLInputElement | null>(null);
+  const newSubHoursRef = useRef<HTMLInputElement | null>(null);
   const subtaskHandleRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const onCloseRef = useRef(onClose);
@@ -289,6 +295,20 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
   const [tagDraft, setTagDraft] = useState('');
   const [newSubtaskText, setNewSubtaskText] = useState('');
   const [newSubtaskHours, setNewSubtaskHours] = useState('');
+
+  const submitNewSubtask = () => {
+    if (!task) return;
+    const cleanText = newSubtaskText.trim();
+    if (!cleanText) {
+      newSubTitleRef.current?.focus();
+      return;
+    }
+    const mins = parseDecimalHours(newSubtaskHours);
+    onAddSubtask(task.id, cleanText, mins);
+    setNewSubtaskText('');
+    setNewSubtaskHours('');
+    newSubTitleRef.current?.focus();
+  };
 
   const draggingSubIdxRef = useRef<number | null>(null);
   const [draggingSubIdx, setDraggingSubIdx] = useState<number | null>(null);
@@ -404,16 +424,20 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
       }
 
       const updatePosition = () => {
-        if (!dialog.open) return;
+        if (!dialog.open || dialog.hasAttribute('data-closing')) return;
         computeAnchoredPosition(dialog, anchorRectRef.current);
       };
 
       updatePosition();
-      const rafId = requestAnimationFrame(updatePosition);
       window.addEventListener('resize', updatePosition);
+      const ro =
+        typeof ResizeObserver !== 'undefined'
+          ? new ResizeObserver(updatePosition)
+          : null;
+      ro?.observe(dialog);
 
       return () => {
-        cancelAnimationFrame(rafId);
+        ro?.disconnect();
         window.removeEventListener('resize', updatePosition);
       };
     } else if (dialog.open) {
@@ -732,6 +756,71 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
               </div>
             </div>
 
+            <form
+              class="editor-subtask-add-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitNewSubtask();
+              }}
+            >
+              <input
+                ref={newSubTitleRef}
+                type="text"
+                class="capture-input editor-subtask-add-input"
+                enterKeyHint="next"
+                aria-label="Subtask title"
+                placeholder="Subtask title (Enter for hrs)..."
+                value={newSubtaskText}
+                onInput={(e) =>
+                  setNewSubtaskText((e.currentTarget as HTMLInputElement).value)
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!newSubtaskText.trim()) return;
+                    newSubHoursRef.current?.focus();
+                    newSubHoursRef.current?.select();
+                  }
+                }}
+              />
+              <div class="capture-hours-wrapper editor-subtask-add-hours-wrap">
+                <input
+                  ref={newSubHoursRef}
+                  type="number"
+                  step="any"
+                  min="0"
+                  enterKeyHint="done"
+                  class="capture-input capture-hours-input editor-subtask-add-hours"
+                  aria-label="Subtask estimated hours"
+                  placeholder="Hours (e.g. 0.25)"
+                  value={newSubtaskHours}
+                  onInput={(e) =>
+                    setNewSubtaskHours((e.currentTarget as HTMLInputElement).value)
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      newSubTitleRef.current?.focus();
+                      return;
+                    }
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      submitNewSubtask();
+                    }
+                  }}
+                />
+                {parsedNewSubMinutes !== undefined && (
+                  <span class="capture-minutes-hint">{parsedNewSubMinutes}m</span>
+                )}
+              </div>
+              <button type="submit" class="btn btn-sm btn-primary">
+                + Add
+              </button>
+            </form>
+
             {checklist.length > 0 && (
               <div class="editor-subtasks-list">
                 {checklist.map((sub, idx) => (
@@ -828,50 +917,6 @@ export function TaskEditorPopover(props: TaskEditorPopoverProps) {
                 ))}
               </div>
             )}
-
-            <form
-              class="editor-subtask-add-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const cleanText = newSubtaskText.trim();
-                if (!cleanText) return;
-                const mins = parseDecimalHours(newSubtaskHours);
-                onAddSubtask(task.id, cleanText, mins);
-                setNewSubtaskText('');
-                setNewSubtaskHours('');
-              }}
-            >
-              <input
-                type="text"
-                class="capture-input editor-subtask-add-input"
-                aria-label="Subtask title"
-                placeholder="Subtask title..."
-                value={newSubtaskText}
-                onInput={(e) =>
-                  setNewSubtaskText((e.currentTarget as HTMLInputElement).value)
-                }
-              />
-              <div class="capture-hours-wrapper editor-subtask-add-hours-wrap">
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  class="capture-input capture-hours-input editor-subtask-add-hours"
-                  aria-label="Subtask estimated hours"
-                  placeholder="Hours (e.g. 0.25)"
-                  value={newSubtaskHours}
-                  onInput={(e) =>
-                    setNewSubtaskHours((e.currentTarget as HTMLInputElement).value)
-                  }
-                />
-                {parsedNewSubMinutes !== undefined && (
-                  <span class="capture-minutes-hint">{parsedNewSubMinutes}m</span>
-                )}
-              </div>
-              <button type="submit" class="btn btn-sm btn-primary">
-                + Add
-              </button>
-            </form>
           </div>
         </div>
       )}

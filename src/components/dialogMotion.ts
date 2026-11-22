@@ -45,7 +45,7 @@ export async function closeTopLayer(
     if (animations.length > 0) {
       await Promise.race([
         Promise.allSettled(animations.map((a) => a.finished)),
-        new Promise<void>((resolve) => window.setTimeout(resolve, 400)),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 180)),
       ]);
     }
     if (!dialog.hasAttribute('data-closing')) return;

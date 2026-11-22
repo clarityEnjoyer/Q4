@@ -248,6 +248,8 @@ export function WorkBlockView(props: WorkBlockViewProps) {
   const [debrief, setDebrief] = useState<WorkBlockDebrief>(createEmptyDebrief);
 
   const timerEndTimeRef = useRef<number | null>(null);
+  const subtaskTitleRef = useRef<HTMLInputElement | null>(null);
+  const subtaskHoursRef = useRef<HTMLInputElement | null>(null);
   const queueRef = useRef(queue);
   const stateRef = useRef(state);
   const currentIndexRef = useRef(currentIndex);
@@ -779,15 +781,25 @@ export function WorkBlockView(props: WorkBlockViewProps) {
     setPhase('PLAN');
   };
 
-  const handleAddSubtaskSubmit = (e: JSX.TargetedSubmitEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const parsedSubtaskMinutes = parseDecimalHours(subtaskHoursDraft);
+
+  const submitSubtaskDraft = () => {
     if (!activeTask) return;
     const trimmed = subtaskDraft.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      subtaskTitleRef.current?.focus();
+      return;
+    }
     const estMinutes = parseDecimalHours(subtaskHoursDraft);
     onAddSubtask(activeTask.id, trimmed, estMinutes);
     setSubtaskDraft('');
     setSubtaskHoursDraft('');
+    subtaskTitleRef.current?.focus();
+  };
+
+  const handleAddSubtaskSubmit = (e: JSX.TargetedSubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    submitSubtaskDraft();
   };
 
   const handleSubtaskDragStart = (
@@ -932,6 +944,60 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                 <p class="wb-task-notes">{activeTask.notes}</p>
               )}
 
+              <form class="subtask-add-form" onSubmit={handleAddSubtaskSubmit}>
+                <input
+                  ref={subtaskTitleRef}
+                  type="text"
+                  class="capture-input"
+                  enterKeyHint="next"
+                  aria-label="Subtask title"
+                  placeholder="Subtask title (Enter for hrs)..."
+                  value={subtaskDraft}
+                  onInput={(e) => setSubtaskDraft(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (!subtaskDraft.trim()) return;
+                      subtaskHoursRef.current?.focus();
+                      subtaskHoursRef.current?.select();
+                    }
+                  }}
+                />
+                <div class="capture-hours-wrapper wb-subtask-hours-wrap">
+                  <input
+                    ref={subtaskHoursRef}
+                    type="number"
+                    step="any"
+                    min="0"
+                    enterKeyHint="done"
+                    class="capture-input capture-hours-input wb-hours-input"
+                    placeholder="Hours (e.g. 0.25)"
+                    aria-label="Subtask estimated hours"
+                    value={subtaskHoursDraft}
+                    onInput={(e) => setSubtaskHoursDraft(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        subtaskTitleRef.current?.focus();
+                        return;
+                      }
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitSubtaskDraft();
+                      }
+                    }}
+                  />
+                  {parsedSubtaskMinutes !== undefined && (
+                    <span class="capture-minutes-hint">
+                      {parsedSubtaskMinutes}m
+                    </span>
+                  )}
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary">
+                  + Add
+                </button>
+              </form>
+
               {activeTask.checklist && activeTask.checklist.length > 0 && (
                 <div class="subtask-list">
                   {activeTask.checklist.map((sub, subIdx) => (
@@ -974,30 +1040,6 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                   ))}
                 </div>
               )}
-
-              <form class="subtask-add-form" onSubmit={handleAddSubtaskSubmit}>
-                <input
-                  type="text"
-                  class="capture-input"
-                  placeholder="Add subtask (press Enter)..."
-                  value={subtaskDraft}
-                  onInput={(e) => setSubtaskDraft(e.currentTarget.value)}
-                />
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  class="capture-input wb-hours-input"
-                  style={{ flex: '0 0 72px', width: '72px' }}
-                  placeholder="hrs"
-                  aria-label="Subtask estimated hours"
-                  value={subtaskHoursDraft}
-                  onInput={(e) => setSubtaskHoursDraft(e.currentTarget.value)}
-                />
-                <button type="submit" class="btn btn-sm">
-                  + Add
-                </button>
-              </form>
             </div>
           )}
 
