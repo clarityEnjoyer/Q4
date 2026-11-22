@@ -51,6 +51,12 @@ function resolveHistory30d(analytics: BoronAnalytics, state: AppState): HistoryD
 
   const sessions = Object.values(state.focusSessions || {});
   const tasks = Object.values(state.tasks || {}).filter((t) => !t.deleted);
+  const sessionMinutesByTask: Record<string, number> = {};
+  for (const s of sessions) {
+    if (s.taskId) {
+      sessionMinutesByTask[s.taskId] = (sessionMinutesByTask[s.taskId] || 0) + s.durationMinutes;
+    }
+  }
 
   for (const dateStr of days) {
     let q1 = 0;
@@ -75,13 +81,19 @@ function resolveHistory30d(analytics: BoronAnalytics, state: AppState): HistoryD
         if (cTimestamp) {
           const cDate = formatDateISO(new Date(cTimestamp));
           if (cDate === dateStr) {
-            const est = t.estimatedMinutes || 0;
-            if (t.quadrant === 'Q1') q1 += est;
+            const reported =
+              t.actualMinutes && t.actualMinutes > 0
+                ? t.actualMinutes
+                : t.estimatedMinutes && t.estimatedMinutes > 0
+                ? t.estimatedMinutes
+                : 0;
+            const additional = Math.max(0, reported - (sessionMinutesByTask[t.id] || 0));
+            if (t.quadrant === 'Q1') q1 += additional;
             else if (t.quadrant === 'Q2') {
-              q2 += est;
+              q2 += additional;
               completedQ2++;
-            } else if (t.quadrant === 'Q3') q3 += est;
-            else if (t.quadrant === 'Q4') q4 += est;
+            } else if (t.quadrant === 'Q3') q3 += additional;
+            else if (t.quadrant === 'Q4') q4 += additional;
           }
         }
       }

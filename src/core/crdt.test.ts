@@ -3,6 +3,7 @@ import { mergeAppState, verifySemilatticeLaws } from './crdt';
 import {
   addSubtask,
   addTask,
+  completeTaskWithTime,
   computeBoronAnalytics,
   createStarterState,
   deleteSubtask,
@@ -11,6 +12,7 @@ import {
   logFocusSession,
   moveTask,
   parseQuickInput,
+  reorderTask,
   resolveQuadrant,
   resolveTaskConflict,
   toggleSubtask,
@@ -423,5 +425,36 @@ describe('Boron Q4 CRDT Semilattice & Domain Engine', () => {
     // Boron Index: 90 / (30 + 90) = 75%
     expect(todayCombined?.boronIndex).toBe(75);
     expect(analyticsAfterSession.todayQ2Minutes).toBe(90);
+  });
+
+  it('preserves Join-Semilattice laws under concurrent reorderTask and completeTaskWithTime edits', () => {
+    let base = createStarterState('node_base');
+    base = addTask(base, 'Q2 Task A ~30m', 'Q2', { id: 'q2_a' });
+    base = addTask(base, 'Q2 Task B ~45m', 'Q2', { id: 'q2_b' });
+
+    // Replica A reorders intra-block and cross-block
+    let replicaA = { ...base, nodeId: 'node_a' };
+    replicaA = reorderTask(replicaA, 'q2_b', 'Q2', 0);
+    replicaA = reorderTask(replicaA, 'starter_q3_parcel', 'Q2', 1);
+
+    // Replica B completes a task with actualMinutes and reorders another
+    let replicaB = { ...base, nodeId: 'node_b' };
+    replicaB = completeTaskWithTime(replicaB, 'q2_a', 42, 1700001000000);
+    replicaB = reorderTask(replicaB, 'starter_q2_workout', 'Q2', 0);
+
+    // Replica C completes a task (lamport + 1) then tombstones q2_b (lamport + 2 > replicaA's reorder)
+    let replicaC = { ...base, nodeId: 'node_c' };
+    replicaC = completeTaskWithTime(replicaC, 'starter_q1_so', 60, 1700002000000);
+    replicaC = deleteTask(replicaC, 'q2_b');
+
+    const verification = verifySemilatticeLaws(replicaA, replicaB, replicaC);
+    expect(verification.idempotent).toBe(true);
+    expect(verification.commutative).toBe(true);
+    expect(verification.associative).toBe(true);
+
+    const merged = mergeAppState(mergeAppState(replicaA, replicaB), replicaC);
+    expect(merged.tasks['q2_a'].actualMinutes).toBe(42);
+    expect(merged.tasks['starter_q1_so'].actualMinutes).toBe(60);
+    expect(merged.tasks['q2_b'].deleted).toBe(true);
   });
 });

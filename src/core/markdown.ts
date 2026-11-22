@@ -1,4 +1,4 @@
-import { computeBoronAnalytics, QUADRANT_META } from './engine';
+import { computeBoronAnalytics, QUADRANT_META, sortTasksInBlock } from './engine';
 import { AppState, Quadrant, TaskItem } from './types';
 
 export function serializeToMarkdown(state: AppState, now: Date = new Date()): string {
@@ -6,9 +6,7 @@ export function serializeToMarkdown(state: AppState, now: Date = new Date()): st
   const allTasks = Object.values(state.tasks).filter((t) => !t.deleted);
 
   const byQuadrant = (q: Quadrant, completed: boolean): TaskItem[] =>
-    allTasks
-      .filter((t) => t.quadrant === q && t.completed === completed)
-      .sort((a, b) => a.createdAt - b.createdAt);
+    sortTasksInBlock(allTasks.filter((t) => t.quadrant === q && t.completed === completed));
 
   const lines: string[] = [];
   lines.push('# Boron Q4 Matrix');
@@ -72,8 +70,9 @@ function formatTaskMarkdownLine(t: TaskItem, includeQuadrantBadge = false): stri
   const qBadge = includeQuadrantBadge ? `[${t.quadrant}] ` : '';
   const due = t.dueDate ? ` due:${t.dueDate}` : '';
   const est = t.estimatedMinutes ? ` ~${t.estimatedMinutes}m` : '';
+  const actual = t.actualMinutes ? ` actual:${t.actualMinutes}m` : '';
 
-  return `- ${checkbox} ${qBadge}${t.title}${due}${est}`;
+  return `- ${checkbox} ${qBadge}${t.title}${due}${est}${actual}`;
 }
 
 export function parseMarkdownTaskLines(markdown: string): Array<{
@@ -111,6 +110,8 @@ export function parseMarkdownTaskLines(markdown: string): Array<{
         .replace(/⏱️\s*`(~[^`]+)`/g, '$1')
         .replace(/🔥\s*`[^`]+`/g, '')
         .replace(/`(\+[a-zA-Z][a-zA-Z0-9_-]*)`/g, '$1')
+        .replace(/\bactual:\d+m\b/gi, '')
+        .replace(/\s+/g, ' ')
         .trim();
 
       results.push({

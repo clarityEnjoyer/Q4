@@ -56,7 +56,11 @@ export interface TaskItem {
 
   /** Estimated or logged deep-work minutes on this task */
   estimatedMinutes?: number;
+  actualMinutes?: number;
   focusMinutesLogged: number;
+
+  /** Custom manual display order within a quadrant block */
+  order?: number;
 
   /** Tracks if this task started in Q2 and escalated to Q1 due to deadline decay */
   escalatedFromQ2?: boolean;
@@ -95,6 +99,8 @@ export interface ConcurrentTaskValue {
   completed: boolean;
   dueDate?: string;
   estimatedMinutes?: number;
+  actualMinutes?: number;
+  order?: number;
   tags?: string[];
   checklist?: SubtaskItem[];
   clock: LogicalClock;

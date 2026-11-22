@@ -1,58 +1,34 @@
-# Boron Q4 Matrix ⏱️
+# Boron Q4 Matrix
 
-> A local-first, zero-backend Progressive Web App (PWA) grounded in Stephen Covey's 4-Quadrant Matrix and Chapter 1 of *The Boron Letters* by Gary & Bond Halbert.
+> Local-first, zero-backend Progressive Web App (PWA) grounded in Stephen Covey's 4-Quadrant Matrix and Chapter 1 of *The Boron Letters* by Gary & Bond Halbert.
 
 [![Deploy to GitHub Pages](https://github.com/clarityEnjoyer/Q4/actions/workflows/deploy.yml/badge.svg)](https://github.com/clarityEnjoyer/Q4/actions/workflows/deploy.yml)
-[![Tests](https://img.shields.io/badge/tests-7%20passed-brightgreen.svg)](#)
 
----
+## Philosophy
 
-## 💡 The Boron Philosophy
+> *"Everything you do in Q2 helps avoid having to do so much in Q1. Take care of important things first and early before the world wakes up."* — [base.md](base.md)
 
-> *"Everything you do in Q2 helps avoid having to do so much in Q1. Take care of important things first and early before the world wakes up."*  
-> — [base.md](base.md)
+Boron Q4 enforces **Q2 Primacy (Important & Not Urgent)**:
+- **Morning Focus Gate**: Opens directly in Q2 Work Block before 10:00 AM if daily Q2 work is pending.
+- **Prevention Loop**: Converts completed Q1 crises into preventive Q2 systems.
+- **Deadline Drift Escalation**: Q2 tasks within 36h of deadline escalate automatically to Q1.
 
-Most productivity tools treat all tasks identically, trapping you in reactive crises (**Q1**) or trivial distractions (**Q3**). Boron Q4 enforces **Q2 Primacy (Important & Not Urgent)**:
-- **Morning Focus Gate**: Defaults to deep work on Q2 tasks before 10:00 AM, hiding urgent fires and chores until your high-leverage work is done.
-- **Prevention Loop**: Turn every Q1 fire into a preventive Q2 habit.
-- **Temporal Decay**: Q2 tasks neglected to within $\le 36\text{h}$ of deadline automatically escalate to Q1.
+## Features
 
----
+- **Pure Functional CRDT Core**: Bounded Join-Semilattice (`A ⊔ B = B ⊔ A`, `(A ⊔ B) ⊔ C = A ⊔ (B ⊔ C)`, `A ⊔ A = A`) with Lamport clocks and tombstone deletions.
+- **3-Step Task Capture**: Keyboard-first `Title -> Decimal Hours -> Calendar Popover` flow (`/` to focus).
+- **Intra-Block & Cross-Block Drag-and-Drop**: Reorder tasks inside any block or across quadrants with pointer or keyboard handles (`Space` + Arrows / `Alt+Arrows`).
+- **3-Phase Work Block**: Budget `Auto-Plan` with proportional timeline -> distraction-free `Focus Cockpit` with wall-clock timer & embedded subtasks -> `Session Debrief`.
+- **Actual Time Tracking**: Native `<dialog>` completion prompt records actual hours taken without double-counting logged timer sessions.
+- **Zero-Backend GitHub Gist Sync**: Offline-first sync storing `q4-state.json` and `Q4-MATRIX.md` in a private Gist.
 
-## ⚡ Key Features
-
-- **Pure Functional CRDT Core**: Formulated as a bounded Join-Semilattice ($A \sqcup B = B \sqcup A$, $(A \sqcup B) \sqcup C = A \sqcup (B \sqcup C)$, $A \sqcup A = A$).
-- **Zero-Backend Cross-Device Sync**: Free synchronization across phone and computer via GitHub Gist storing both `q4-state.json` and human-readable `Q4-MATRIX.md`.
-- **Rapid 2-Decision Triage**: Rapid keyboard flow (`[Y]/[N]` Important $\to$ `[Y]/[N]` Urgent $\implies$ Q1/Q2/Q3/Q4).
-- **Shorthand DSL**: Quick input supports `#q1..#q4`, `+tag`, `due:YYYY-MM-DD`, and `~45m`.
-- **Background-Resilient Timer**: Anchored to wall-clock epoch time with `visibilitychange` sync to survive browser tab throttling.
-- **Offline PWA**: Installable on iOS, Android, and Desktop with offline caching.
-
----
-
-## 🛠️ Quick Start
+## Quick Start
 
 ```bash
-# Clone and install dependencies
-git clone https://github.com/clarityEnjoyer/Q4.git
-cd Q4
 npm install
-
-# Start local development server
-npm run dev
-
-# Run Vitest CRDT test suite
-npm test
-
-# Build production bundle
-npm run build
+npm run dev    # Local dev server
+npm test       # Run Vitest suite
+npm run build  # Typecheck and production build
 ```
 
----
-
-## 📖 In-Depth Documentation
-
-For complete architectural specifications, mathematical proofs, conflict resolution rules, and the engineering roadmap, see:
-
-👉 **[DEVELOPMENT.md](DEVELOPMENT.md)**
-
+See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture and subsystem contracts.

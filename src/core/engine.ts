@@ -106,6 +106,91 @@ export function formatDateISO(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+export const ORDER_STEP = 1024;
+
+export const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+export const DAY_HEADERS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+export function parseDecimalHours(input: string | number | undefined | null): number | undefined {
+  if (input === undefined || input === null) return undefined;
+  const str = typeof input === 'number' ? String(input) : input.trim().replace(',', '.');
+  if (!str) return undefined;
+  const num = parseFloat(str);
+  if (!Number.isFinite(num) || num <= 0) return undefined;
+  return Math.round(num * 60);
+}
+
+export function formatMinutesAsDecimalHours(minutes?: number): string {
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0) return '';
+  const rounded = Math.round((minutes / 60) * 100) / 100;
+  return String(rounded);
+}
+
+export function calculateOffsetDate(
+  offset: number,
+  baseDate: Date = new Date()
+): {
+  iso: string;
+  year: number;
+  month: number;
+  day: number;
+} {
+  const target = new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate() + offset
+  );
+  return {
+    iso: formatDateISO(target),
+    year: target.getFullYear(),
+    month: target.getMonth(),
+    day: target.getDate(),
+  };
+}
+
+export function sortTasksInBlock(tasks: TaskItem[]): TaskItem[] {
+  return [...tasks].sort((a, b) => {
+    const compDiff = Number(a.completed) - Number(b.completed);
+    if (compDiff !== 0) return compDiff;
+    const orderDiff = (a.order ?? a.createdAt) - (b.order ?? b.createdAt);
+    if (orderDiff !== 0) return orderDiff;
+    const createdDiff = a.createdAt - b.createdAt;
+    if (createdDiff !== 0) return createdDiff;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function nextOrderInQuadrant(
+  tasks: Record<string, TaskItem>,
+  quadrant: Quadrant,
+  excludeId?: string
+): number {
+  let maxOrder: number | undefined;
+  for (const t of Object.values(tasks)) {
+    if (t.deleted || t.quadrant !== quadrant || t.id === excludeId) continue;
+    if (typeof t.order === 'number' && Number.isFinite(t.order)) {
+      if (maxOrder === undefined || t.order > maxOrder) {
+        maxOrder = t.order;
+      }
+    }
+  }
+  return (maxOrder ?? 0) + ORDER_STEP;
+}
+
 export function generateId(prefix = 't'): string {
   const rand = Math.random().toString(36).substring(2, 9);
   return `${prefix}_${Date.now().toString(36)}_${rand}`;
@@ -125,6 +210,8 @@ export function addTask(
       | 'completed'
       | 'completedAt'
       | 'estimatedMinutes'
+      | 'actualMinutes'
+      | 'order'
       | 'tags'
       | 'checklist'
     >
@@ -136,19 +223,23 @@ export function addTask(
   const clock = nextClock(state);
   const id = extra?.id || generateId('task');
   const completed = Boolean(extra?.completed);
+  const targetQuadrant = parsed.quadrant || defaultQuadrant;
   const mergedTags = Array.from(new Set([...(parsed.tags || []), ...(extra?.tags || [])]));
+  const order = extra?.order ?? nextOrderInQuadrant(state.tasks, targetQuadrant);
 
   const task: TaskItem = {
     id,
     title: parsed.cleanTitle,
     notes: extra?.notes,
-    quadrant: parsed.quadrant || defaultQuadrant,
+    quadrant: targetQuadrant,
     completed,
     completedAt: completed ? extra?.completedAt || clock.wallTime : undefined,
     createdAt: clock.wallTime,
     dueDate: extra?.dueDate || parsed.dueDate,
     estimatedMinutes: extra?.estimatedMinutes ?? parsed.estimatedMinutes,
+    actualMinutes: extra?.actualMinutes,
     focusMinutesLogged: 0,
+    order,
     preventsTaskId: extra?.preventsTaskId,
     tags: mergedTags,
     checklist: extra?.checklist ? extra.checklist.map((s) => ({ ...s })) : undefined,
@@ -184,6 +275,11 @@ export function moveTask(
   if (!existing || existing.deleted) return state;
 
   const clock = nextClock(state);
+  const order =
+    existing.quadrant !== quadrant
+      ? nextOrderInQuadrant(state.tasks, quadrant, taskId)
+      : existing.order;
+
   return {
     ...state,
     maxLamport: clock.lamport,
@@ -192,10 +288,98 @@ export function moveTask(
       [taskId]: {
         ...existing,
         quadrant,
+        order,
         concurrentConflicts: undefined,
         clock,
       },
     },
+  };
+}
+
+export function reorderTask(
+  state: AppState,
+  taskId: string,
+  targetQuadrant: Quadrant,
+  targetIndex?: number
+): AppState {
+  const existing = state.tasks[taskId];
+  if (!existing || existing.deleted) return state;
+
+  const group = sortTasksInBlock(
+    Object.values(state.tasks).filter(
+      (t) =>
+        !t.deleted &&
+        t.quadrant === targetQuadrant &&
+        t.completed === existing.completed
+    )
+  );
+  const siblings = group.filter((t) => t.id !== taskId);
+  const clampedIndex =
+    targetIndex === undefined
+      ? siblings.length
+      : Math.max(0, Math.min(targetIndex, siblings.length));
+
+  if (existing.quadrant === targetQuadrant) {
+    const currentIndex = group.findIndex((t) => t.id === taskId);
+    if (currentIndex === clampedIndex) {
+      return state;
+    }
+  }
+
+  const prev = siblings[clampedIndex - 1];
+  const next = siblings[clampedIndex];
+
+  const prevHasOrder =
+    prev !== undefined && typeof prev.order === 'number' && Number.isFinite(prev.order);
+  const nextHasOrder =
+    next !== undefined && typeof next.order === 'number' && Number.isFinite(next.order);
+
+  let newOrder: number | undefined;
+  if (!prev && !next) {
+    newOrder = ORDER_STEP;
+  } else if (!prev && nextHasOrder) {
+    newOrder = next.order! - ORDER_STEP;
+  } else if (prevHasOrder && !next) {
+    newOrder = prev.order! + ORDER_STEP;
+  } else if (prevHasOrder && nextHasOrder && next.order! - prev.order! > 1e-4) {
+    newOrder = (prev.order! + next.order!) / 2;
+  }
+
+  const clock = nextClock(state);
+  if (newOrder !== undefined) {
+    return {
+      ...state,
+      maxLamport: clock.lamport,
+      tasks: {
+        ...state.tasks,
+        [taskId]: {
+          ...existing,
+          quadrant: targetQuadrant,
+          order: newOrder,
+          concurrentConflicts: undefined,
+          clock,
+        },
+      },
+    };
+  }
+
+  const ordered = [...siblings];
+  ordered.splice(clampedIndex, 0, existing);
+  const updatedTasks = { ...state.tasks };
+  ordered.forEach((item, idx) => {
+    updatedTasks[item.id] = {
+      ...item,
+      quadrant: item.id === taskId ? targetQuadrant : item.quadrant,
+      order: (idx + 1) * ORDER_STEP,
+      concurrentConflicts: undefined,
+      clock,
+    };
+  });
+
+  return {
+    ...state,
+    maxLamport: clock.lamport,
+    tasks: updatedTasks,
   };
 }
 
@@ -232,6 +416,38 @@ export function updateTaskDetails(
   };
 }
 
+export function completeTaskWithTime(
+  state: AppState,
+  taskId: string,
+  actualMinutes?: number,
+  now?: number
+): AppState {
+  const existing = state.tasks[taskId];
+  if (!existing || existing.deleted) return state;
+
+  const clock = nextClock(state, now);
+  const cleanActual =
+    actualMinutes !== undefined && Number.isFinite(actualMinutes) && actualMinutes > 0
+      ? Math.round(actualMinutes)
+      : undefined;
+
+  return {
+    ...state,
+    maxLamport: clock.lamport,
+    tasks: {
+      ...state.tasks,
+      [taskId]: {
+        ...existing,
+        completed: true,
+        completedAt: clock.wallTime,
+        actualMinutes: cleanActual,
+        concurrentConflicts: undefined,
+        clock,
+      },
+    },
+  };
+}
+
 export function toggleTaskCompleted(state: AppState, taskId: string): AppState {
   const existing = state.tasks[taskId];
   if (!existing || existing.deleted) return state;
@@ -247,6 +463,7 @@ export function toggleTaskCompleted(state: AppState, taskId: string): AppState {
         ...existing,
         completed,
         completedAt: completed ? clock.wallTime : undefined,
+        actualMinutes: completed ? existing.actualMinutes : undefined,
         concurrentConflicts: undefined,
         clock,
       },
@@ -566,6 +783,33 @@ export function computeBoronAnalytics(
   const dailyFocus = new Map<string, { q1: number; q2: number; q3: number; q4: number }>();
   const dailyCompletedQ2 = new Map<string, number>();
   const activeQ2Dates = new Set<string>();
+  const sessionMinutesByTask: Record<string, number> = {};
+
+  for (const session of Object.values(state.focusSessions || {})) {
+    focusMinutesByQuadrant[session.quadrant] =
+      (focusMinutesByQuadrant[session.quadrant] || 0) + session.durationMinutes;
+
+    if (session.taskId) {
+      sessionMinutesByTask[session.taskId] =
+        (sessionMinutesByTask[session.taskId] || 0) + session.durationMinutes;
+    }
+
+    const sessionDateStr = formatDateISO(new Date(session.endedAt));
+    const dayEntry = dailyFocus.get(sessionDateStr) || { q1: 0, q2: 0, q3: 0, q4: 0 };
+    if (session.quadrant === 'Q1') dayEntry.q1 += session.durationMinutes;
+    else if (session.quadrant === 'Q2') dayEntry.q2 += session.durationMinutes;
+    else if (session.quadrant === 'Q3') dayEntry.q3 += session.durationMinutes;
+    else if (session.quadrant === 'Q4') dayEntry.q4 += session.durationMinutes;
+    dailyFocus.set(sessionDateStr, dayEntry);
+
+    if (session.quadrant === 'Q2') {
+      activeQ2Dates.add(sessionDateStr);
+      if (sessionDateStr === todayStr) {
+        didQ2Today = true;
+        todayQ2Minutes += session.durationMinutes;
+      }
+    }
+  }
 
   for (const task of Object.values(state.tasks)) {
     if (task.deleted) continue;
@@ -592,43 +836,33 @@ export function computeBoronAnalytics(
         }
       }
 
-      if (task.quadrant !== 'INBOX' && task.estimatedMinutes && task.estimatedMinutes > 0) {
-        const dayEntry = dailyFocus.get(completedDateStr) || { q1: 0, q2: 0, q3: 0, q4: 0 };
-        if (task.quadrant === 'Q1') dayEntry.q1 += task.estimatedMinutes;
-        else if (task.quadrant === 'Q2') {
-          dayEntry.q2 += task.estimatedMinutes;
-          activeQ2Dates.add(completedDateStr);
-          if (completedDateStr === todayStr) {
-            didQ2Today = true;
-            todayQ2Minutes += task.estimatedMinutes;
-          }
-        } else if (task.quadrant === 'Q3') dayEntry.q3 += task.estimatedMinutes;
-        else if (task.quadrant === 'Q4') dayEntry.q4 += task.estimatedMinutes;
-        dailyFocus.set(completedDateStr, dayEntry);
+      if (task.quadrant !== 'INBOX') {
+        const reportedMinutes =
+          task.actualMinutes && task.actualMinutes > 0
+            ? task.actualMinutes
+            : task.estimatedMinutes && task.estimatedMinutes > 0
+            ? task.estimatedMinutes
+            : 0;
+        const alreadyLogged = sessionMinutesByTask[task.id] || 0;
+        const additionalMinutes = Math.max(0, reportedMinutes - alreadyLogged);
+
+        if (additionalMinutes > 0) {
+          const dayEntry = dailyFocus.get(completedDateStr) || { q1: 0, q2: 0, q3: 0, q4: 0 };
+          if (task.quadrant === 'Q1') dayEntry.q1 += additionalMinutes;
+          else if (task.quadrant === 'Q2') {
+            dayEntry.q2 += additionalMinutes;
+            activeQ2Dates.add(completedDateStr);
+            if (completedDateStr === todayStr) {
+              didQ2Today = true;
+              todayQ2Minutes += additionalMinutes;
+            }
+          } else if (task.quadrant === 'Q3') dayEntry.q3 += additionalMinutes;
+          else if (task.quadrant === 'Q4') dayEntry.q4 += additionalMinutes;
+          dailyFocus.set(completedDateStr, dayEntry);
+        }
       }
     } else {
       activeByQuadrant[task.quadrant]++;
-    }
-  }
-
-  for (const session of Object.values(state.focusSessions || {})) {
-    focusMinutesByQuadrant[session.quadrant] =
-      (focusMinutesByQuadrant[session.quadrant] || 0) + session.durationMinutes;
-
-    const sessionDateStr = formatDateISO(new Date(session.endedAt));
-    const dayEntry = dailyFocus.get(sessionDateStr) || { q1: 0, q2: 0, q3: 0, q4: 0 };
-    if (session.quadrant === 'Q1') dayEntry.q1 += session.durationMinutes;
-    else if (session.quadrant === 'Q2') dayEntry.q2 += session.durationMinutes;
-    else if (session.quadrant === 'Q3') dayEntry.q3 += session.durationMinutes;
-    else if (session.quadrant === 'Q4') dayEntry.q4 += session.durationMinutes;
-    dailyFocus.set(sessionDateStr, dayEntry);
-
-    if (session.quadrant === 'Q2') {
-      activeQ2Dates.add(sessionDateStr);
-      if (sessionDateStr === todayStr) {
-        didQ2Today = true;
-        todayQ2Minutes += session.durationMinutes;
-      }
     }
   }
 
@@ -796,6 +1030,7 @@ export function createStarterState(nodeId: string): AppState {
       createdAt: genesisClock.wallTime + idx,
       estimatedMinutes: item.estimatedMinutes,
       focusMinutesLogged: 0,
+      order: (idx + 1) * ORDER_STEP,
       tags: item.tags,
       clock: genesisClock,
     };
