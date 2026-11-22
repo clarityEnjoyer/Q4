@@ -1,11 +1,12 @@
 import { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
+  formatClock24h,
   formatMinutesAsDecimalHours,
   parseDecimalHours,
   sortTasksInBlock,
 } from '../core/engine';
-import { AppState, Quadrant, TaskItem } from '../core/types';
+import { AppState, Quadrant, SubtaskItem, TaskItem } from '../core/types';
 import {
   autoPlanWorkBlock,
   computeWorkBlockSchedule,
@@ -15,6 +16,8 @@ import {
   moveWorkBlockItem,
   reconcileBreaks,
   resolveLogQuadrant,
+  SCOPE_DESCRIPTIONS,
+  SCOPE_QUADRANTS,
   WorkBlockDebrief,
   WorkBlockItem,
   WorkBlockScope,
@@ -34,8 +37,14 @@ export interface WorkBlockViewProps {
     suggestedMinutes: number | undefined,
     onCompleted: (actualMinutes?: number) => void
   ) => void;
-  onAddSubtask: (taskId: string, text: string) => void;
+  onAddSubtask: (taskId: string, text: string, estimatedMinutes?: number) => void;
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
+  onUpdateSubtask: (
+    taskId: string,
+    subtaskId: string,
+    patch: Partial<Pick<SubtaskItem, 'text' | 'estimatedMinutes'>>
+  ) => void;
+  onReorderSubtask: (taskId: string, fromIndex: number, toIndex: number) => void;
   onGoMatrix: () => void;
 }
 
@@ -61,7 +70,7 @@ const BUDGET_PRESETS: Array<{ label: string; minutes: number }> = [
 const SCOPE_OPTIONS: Array<{ value: WorkBlockScope; label: string }> = [
   { value: 'Q2_FIRST', label: 'Q2 First' },
   { value: 'Q2_ONLY', label: 'Q2 Only' },
-  { value: 'Q1_Q2', label: 'Q1 + Q2' },
+  { value: 'Q1_Q2', label: 'Q1 → Q2' },
 ];
 
 function createEmptyDebrief(): WorkBlockDebrief {
@@ -144,13 +153,6 @@ function savePersistedPlan(plan: PersistedWorkBlockPlan): void {
   }
 }
 
-function formatClockHHMM(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function nextRestDuration(currentMinutes: number): number {
   if (currentMinutes === 3) return 5;
   if (currentMinutes === 5) return 10;
@@ -209,6 +211,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
     onRequestCompleteFromWorkBlock,
     onAddSubtask,
     onToggleSubtask,
+    onReorderSubtask,
     onGoMatrix,
   } = props;
 
@@ -239,6 +242,9 @@ export function WorkBlockView(props: WorkBlockViewProps) {
   const [timerSecondsLeft, setTimerSecondsLeft] = useState<number>(25 * 60);
   const [timerRunning, setTimerRunning] = useState<boolean>(false);
   const [subtaskDraft, setSubtaskDraft] = useState<string>('');
+  const [subtaskHoursDraft, setSubtaskHoursDraft] = useState<string>('');
+  const [subDragIndex, setSubDragIndex] = useState<number | null>(null);
+  const [subDragOverIndex, setSubDragOverIndex] = useState<number | null>(null);
   const [debrief, setDebrief] = useState<WorkBlockDebrief>(createEmptyDebrief);
 
   const timerEndTimeRef = useRef<number | null>(null);
@@ -356,10 +362,16 @@ export function WorkBlockView(props: WorkBlockViewProps) {
     if (pickerTab === 'Q1') {
       return sortTasksInBlock(active.filter((t) => t.quadrant === 'Q1'));
     }
-    const q2First = sortTasksInBlock(active.filter((t) => t.quadrant === 'Q2'));
-    const rest = sortTasksInBlock(active.filter((t) => t.quadrant !== 'Q2'));
-    return [...q2First, ...rest];
-  }, [state.tasks, pickerTab]);
+    const priorityQuads = SCOPE_QUADRANTS[scope];
+    const prioritySet = new Set<Quadrant>(priorityQuads);
+    const prioritized = priorityQuads.flatMap((q) =>
+      sortTasksInBlock(active.filter((t) => t.quadrant === q))
+    );
+    const remaining = sortTasksInBlock(
+      active.filter((t) => !prioritySet.has(t.quadrant))
+    );
+    return [...prioritized, ...remaining];
+  }, [state.tasks, pickerTab, scope]);
 
   const activeItem = phase === 'FOCUS' ? queue[currentIndex] : undefined;
   const activeTask =
@@ -431,6 +443,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
       setSlotDurationMinutes(nextDur);
       setTimerSecondsLeft(nextDur * 60);
       setSubtaskDraft('');
+      setSubtaskHoursDraft('');
       if (startTimer) {
         timerEndTimeRef.current = Date.now() + nextDur * 60 * 1000;
         setTimerRunning(true);
@@ -443,6 +456,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
       setTimerRunning(false);
       setTimerSecondsLeft(0);
       setSubtaskDraft('');
+      setSubtaskHoursDraft('');
       setPhase('DEBRIEF');
     }
   };
@@ -477,6 +491,22 @@ export function WorkBlockView(props: WorkBlockViewProps) {
   const handleSelectBudgetPreset = (minutes: number) => {
     setBudgetMinutes(minutes);
     setCustomHoursInput(formatMinutesAsDecimalHours(minutes));
+    const planned = autoPlanWorkBlock(
+      Object.values(state.tasks),
+      minutes,
+      { scope, includeBreaks }
+    );
+    setQueue(planned);
+  };
+
+  const handleSelectScope = (nextScope: WorkBlockScope) => {
+    setScope(nextScope);
+    const planned = autoPlanWorkBlock(
+      Object.values(state.tasks),
+      budgetMinutes,
+      { scope: nextScope, includeBreaks }
+    );
+    setQueue(planned);
   };
 
   const handleCustomHoursChange = (
@@ -516,6 +546,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
     timerEndTimeRef.current = Date.now() + firstDur * 60 * 1000;
     setTimerRunning(true);
     setSubtaskDraft('');
+    setSubtaskHoursDraft('');
     setDebrief(createEmptyDebrief());
     setPhase('FOCUS');
   };
@@ -753,8 +784,73 @@ export function WorkBlockView(props: WorkBlockViewProps) {
     if (!activeTask) return;
     const trimmed = subtaskDraft.trim();
     if (!trimmed) return;
-    onAddSubtask(activeTask.id, trimmed);
+    const estMinutes = parseDecimalHours(subtaskHoursDraft);
+    onAddSubtask(activeTask.id, trimmed, estMinutes);
     setSubtaskDraft('');
+    setSubtaskHoursDraft('');
+  };
+
+  const handleSubtaskDragStart = (
+    index: number,
+    e: JSX.TargetedDragEvent<HTMLElement>
+  ) => {
+    setSubDragIndex(index);
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(index));
+    }
+  };
+
+  const handleSubtaskDragOver = (
+    index: number,
+    e: JSX.TargetedDragEvent<HTMLElement>
+  ) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+    if (subDragOverIndex !== index) {
+      setSubDragOverIndex(index);
+    }
+  };
+
+  const handleSubtaskDrop = (
+    toIndex: number,
+    e: JSX.TargetedDragEvent<HTMLElement>
+  ) => {
+    e.preventDefault();
+    if (!activeTask) return;
+    const rawFrom = e.dataTransfer?.getData('text/plain');
+    const parsedFrom = rawFrom ? parseInt(rawFrom, 10) : NaN;
+    const fromIndex = Number.isFinite(parsedFrom) ? parsedFrom : subDragIndex;
+
+    if (fromIndex !== null && fromIndex !== toIndex) {
+      onReorderSubtask(activeTask.id, fromIndex, toIndex);
+    }
+    setSubDragIndex(null);
+    setSubDragOverIndex(null);
+  };
+
+  const handleSubtaskDragEnd = () => {
+    setSubDragIndex(null);
+    setSubDragOverIndex(null);
+  };
+
+  const handleSubtaskHandleKeyDown = (
+    index: number,
+    e: JSX.TargetedKeyboardEvent<HTMLButtonElement>
+  ) => {
+    if (!activeTask || !activeTask.checklist) return;
+    const btn = e.currentTarget;
+    if (e.key === 'ArrowUp' && index > 0) {
+      e.preventDefault();
+      onReorderSubtask(activeTask.id, index, index - 1);
+      requestAnimationFrame(() => btn.focus({ preventScroll: true }));
+    } else if (e.key === 'ArrowDown' && index < activeTask.checklist.length - 1) {
+      e.preventDefault();
+      onReorderSubtask(activeTask.id, index, index + 1);
+      requestAnimationFrame(() => btn.focus({ preventScroll: true }));
+    }
   };
 
   const handlePlanNextBlock = () => {
@@ -823,7 +919,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
             >
               {getFocusBadgeLabel(activeItem, activeTask)}
             </span>
-            <span class="mono">Ends {formatClockHHMM(projectedEndMs)}</span>
+            <span class="wb-time-pill mono">Ends {formatClock24h(projectedEndMs)}</span>
           </div>
 
           <h2 class="wb-focus-title">{activeSlotTitle}</h2>
@@ -838,20 +934,43 @@ export function WorkBlockView(props: WorkBlockViewProps) {
 
               {activeTask.checklist && activeTask.checklist.length > 0 && (
                 <div class="subtask-list">
-                  {activeTask.checklist.map((sub) => (
-                    <label
+                  {activeTask.checklist.map((sub, subIdx) => (
+                    <div
                       key={sub.id}
-                      for={`wb-sub-${sub.id}`}
-                      class={`subtask-item ${sub.done ? 'done' : ''}`}
+                      class={`subtask-item ${sub.done ? 'done' : ''} ${
+                        subDragOverIndex === subIdx ? 'drag-over' : ''
+                      } ${subDragIndex === subIdx ? 'dragging' : ''}`}
+                      draggable
+                      onDragStart={(e) => handleSubtaskDragStart(subIdx, e)}
+                      onDragOver={(e) => handleSubtaskDragOver(subIdx, e)}
+                      onDragLeave={() => setSubDragOverIndex(null)}
+                      onDrop={(e) => handleSubtaskDrop(subIdx, e)}
+                      onDragEnd={handleSubtaskDragEnd}
                     >
+                      <button
+                        type="button"
+                        class="drag-handle"
+                        aria-label={`Reorder ${sub.text} with ArrowUp or ArrowDown`}
+                        onKeyDown={(e) => handleSubtaskHandleKeyDown(subIdx, e)}
+                      >
+                        ⠿
+                      </button>
                       <input
                         id={`wb-sub-${sub.id}`}
                         type="checkbox"
                         checked={sub.done}
                         onChange={() => onToggleSubtask(activeTask.id, sub.id)}
                       />
-                      <span class="subtask-text">{sub.text}</span>
-                    </label>
+                      <label for={`wb-sub-${sub.id}`} class="subtask-text">
+                        {sub.text}
+                      </label>
+                      {sub.estimatedMinutes !== undefined &&
+                        sub.estimatedMinutes > 0 && (
+                          <span class="wb-slot-dur mono">
+                            ~{Math.round(sub.estimatedMinutes)}m
+                          </span>
+                        )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -863,6 +982,17 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                   placeholder="Add subtask (press Enter)..."
                   value={subtaskDraft}
                   onInput={(e) => setSubtaskDraft(e.currentTarget.value)}
+                />
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  class="capture-input wb-hours-input"
+                  style={{ flex: '0 0 72px', width: '72px' }}
+                  placeholder="hrs"
+                  aria-label="Subtask estimated hours"
+                  value={subtaskHoursDraft}
+                  onInput={(e) => setSubtaskHoursDraft(e.currentTarget.value)}
                 />
                 <button type="submit" class="btn btn-sm">
                   + Add
@@ -1019,7 +1149,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                 key={opt.value}
                 type="button"
                 class={`btn btn-sm ${scope === opt.value ? 'btn-q2' : ''}`}
-                onClick={() => setScope(opt.value)}
+                onClick={() => handleSelectScope(opt.value)}
               >
                 {opt.label}
               </button>
@@ -1046,6 +1176,8 @@ export function WorkBlockView(props: WorkBlockViewProps) {
             Auto-Plan
           </button>
         </div>
+
+        <div class="wb-scope-hint">{SCOPE_DESCRIPTIONS[scope]}</div>
       </div>
 
       {schedule.slots.length > 0 && (
@@ -1067,13 +1199,18 @@ export function WorkBlockView(props: WorkBlockViewProps) {
             })}
           </div>
 
+          <div class="wb-timeline-axis mono">
+            <span>{formatClock24h(schedule.slots[0].startMs)}</span>
+            <span>{formatClock24h(schedule.endMs)}</span>
+          </div>
+
           <div class="wb-timeline-summary">
             <div class="wb-timeline-metrics mono">
               <span>{formatDurationHours(schedule.totalMinutes)}</span>
               <span>
                 {schedule.workMinutes}m work · {schedule.restMinutes}m rest
               </span>
-              <span>Ends {formatClockHHMM(schedule.endMs)}</span>
+              <span class="wb-time-pill mono">Ends {formatClock24h(schedule.endMs)}</span>
               <span>{schedule.q2SharePct}% Q2</span>
             </div>
 
@@ -1145,7 +1282,7 @@ export function WorkBlockView(props: WorkBlockViewProps) {
                 }
 
                 const quad = slot.quadrant || 'Q2';
-                const timeRange = `${formatClockHHMM(slot.startMs)}–${formatClockHHMM(slot.endMs)}`;
+                const timeRange = `${formatClock24h(slot.startMs)}–${formatClock24h(slot.endMs)}`;
 
                 return (
                   <div

@@ -36,6 +36,7 @@ export interface SubtaskItem {
   id: string;
   text: string;
   done: boolean;
+  estimatedMinutes?: number;
 }
 
 export interface TaskItem {

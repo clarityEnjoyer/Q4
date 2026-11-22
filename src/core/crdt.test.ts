@@ -12,12 +12,14 @@ import {
   logFocusSession,
   moveTask,
   parseQuickInput,
+  reorderSubtask,
   reorderTask,
   resolveQuadrant,
   resolveTaskConflict,
   toggleSubtask,
   toggleTaskCompleted,
   triageTask,
+  updateSubtask,
   updateTaskDetails,
 } from './engine';
 import { parseMarkdownTaskLines, serializeToMarkdown } from './markdown';
@@ -456,5 +458,33 @@ describe('Boron Q4 CRDT Semilattice & Domain Engine', () => {
     expect(merged.tasks['q2_a'].actualMinutes).toBe(42);
     expect(merged.tasks['starter_q1_so'].actualMinutes).toBe(60);
     expect(merged.tasks['q2_b'].deleted).toBe(true);
+  });
+
+  it('preserves Join-Semilattice laws under concurrent updateSubtask (estimatedMinutes) and reorderSubtask edits', () => {
+    let base = createStarterState('node_sub');
+    base = addSubtask(base, 'starter_q2_workout', 'Warmup', 10);
+    base = addSubtask(base, 'starter_q2_workout', 'Main set', 25);
+    const subAId = base.tasks['starter_q2_workout'].checklist![0].id;
+    const subBId = base.tasks['starter_q2_workout'].checklist![1].id;
+
+    let replicaA = { ...base, nodeId: 'node_a' };
+    replicaA = updateSubtask(replicaA, 'starter_q2_workout', subAId, {
+      text: 'Dynamic warmup',
+      estimatedMinutes: 15,
+    });
+
+    let replicaB = { ...base, nodeId: 'node_b' };
+    replicaB = reorderSubtask(replicaB, 'starter_q2_workout', 1, 0);
+
+    let replicaC = { ...base, nodeId: 'node_c' };
+    replicaC = addSubtask(replicaC, 'starter_q2_workout', 'Cooldown', 5);
+    replicaC = updateSubtask(replicaC, 'starter_q2_workout', subBId, {
+      estimatedMinutes: 30,
+    });
+
+    const verification = verifySemilatticeLaws(replicaA, replicaB, replicaC);
+    expect(verification.idempotent).toBe(true);
+    expect(verification.commutative).toBe(true);
+    expect(verification.associative).toBe(true);
   });
 });

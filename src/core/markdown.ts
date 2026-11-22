@@ -15,16 +15,23 @@ export function serializeToMarkdown(state: AppState, now: Date = new Date()): st
   );
   lines.push('');
 
+  const pushSubtasks = (t: TaskItem) => {
+    if (!t.checklist) return;
+    for (const sub of t.checklist) {
+      const est =
+        sub.estimatedMinutes && sub.estimatedMinutes > 0
+          ? ` ~${sub.estimatedMinutes}m`
+          : '';
+      lines.push(`  - [${sub.done ? 'x' : ' '}] ${sub.text}${est}`);
+    }
+  };
+
   const inboxTasks = byQuadrant('INBOX', false);
   if (inboxTasks.length > 0) {
     lines.push('## Inbox');
     for (const t of inboxTasks) {
       lines.push(formatTaskMarkdownLine(t));
-      if (t.checklist) {
-        for (const sub of t.checklist) {
-          lines.push(`  - [${sub.done ? 'x' : ' '}] ${sub.text}`);
-        }
-      }
+      pushSubtasks(t);
     }
     lines.push('');
   }
@@ -37,11 +44,7 @@ export function serializeToMarkdown(state: AppState, now: Date = new Date()): st
     lines.push(`## ${meta.title}`);
     for (const t of active) {
       lines.push(formatTaskMarkdownLine(t));
-      if (t.checklist) {
-        for (const sub of t.checklist) {
-          lines.push(`  - [${sub.done ? 'x' : ' '}] ${sub.text}`);
-        }
-      }
+      pushSubtasks(t);
     }
     lines.push('');
   }
@@ -54,11 +57,7 @@ export function serializeToMarkdown(state: AppState, now: Date = new Date()): st
     lines.push('## Completed');
     for (const t of completedTasks.slice(0, 15)) {
       lines.push(formatTaskMarkdownLine(t, true));
-      if (t.checklist) {
-        for (const sub of t.checklist) {
-          lines.push(`  - [${sub.done ? 'x' : ' '}] ${sub.text}`);
-        }
-      }
+      pushSubtasks(t);
     }
   }
 

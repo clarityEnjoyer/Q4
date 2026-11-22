@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { formatMinutesAsDecimalHours, parseDecimalHours } from '../core/engine';
 import { TaskItem } from '../core/types';
+import { closeTopLayer, supportsTopLayerExit } from './dialogMotion';
 
 export interface CompleteTaskDialogProps {
   task: TaskItem | null;
@@ -48,7 +49,13 @@ export function CompleteTaskDialog(props: CompleteTaskDialogProps) {
       }
     };
 
+    const handleCancel = (e: Event) => {
+      e.preventDefault();
+      void closeTopLayer(dialog, 'cancel');
+    };
+
     dialog.addEventListener('close', handleClose);
+    dialog.addEventListener('cancel', handleCancel);
 
     let cleanupBackdrop: (() => void) | undefined;
     if (
@@ -73,7 +80,7 @@ export function CompleteTaskDialog(props: CompleteTaskDialogProps) {
 
       const handlePointerUp = (e: PointerEvent) => {
         if (pointerDownOutside && e.target === dialog && isOutsideRect(e)) {
-          dialog.close();
+          void closeTopLayer(dialog, 'cancel');
         }
         pointerDownOutside = false;
       };
@@ -95,6 +102,7 @@ export function CompleteTaskDialog(props: CompleteTaskDialogProps) {
 
     return () => {
       dialog.removeEventListener('close', handleClose);
+      dialog.removeEventListener('cancel', handleCancel);
       cleanupBackdrop?.();
     };
   }, []);
@@ -134,6 +142,7 @@ export function CompleteTaskDialog(props: CompleteTaskDialogProps) {
 
       return () => cancelAnimationFrame(rafId);
     } else if (dialog.open) {
+      dialog.removeAttribute('data-closing');
       dialog.close();
     }
   }, [task, suggestedMinutes]);
@@ -160,7 +169,16 @@ export function CompleteTaskDialog(props: CompleteTaskDialogProps) {
       aria-labelledby="complete-dialog-title"
       {...({ closedby: 'any' } as Record<string, unknown>)}
     >
-      <form method="dialog" class="complete-dialog-form">
+      <form
+        method="dialog"
+        class="complete-dialog-form"
+        onSubmit={(e) => {
+          if (!supportsTopLayerExit() && dialogRef.current) {
+            e.preventDefault();
+            void closeTopLayer(dialogRef.current, 'confirm');
+          }
+        }}
+      >
         <h2 id="complete-dialog-title">Finish Task</h2>
         <p class="complete-dialog-task">{task?.title ?? ''}</p>
         {referenceParts.length > 0 && (
@@ -192,14 +210,18 @@ export function CompleteTaskDialog(props: CompleteTaskDialogProps) {
           <button
             type="button"
             class="btn"
-            onClick={() => dialogRef.current?.close('cancel')}
+            onClick={() => {
+              if (dialogRef.current) void closeTopLayer(dialogRef.current, 'cancel');
+            }}
           >
             Cancel
           </button>
           <button
             type="button"
             class="btn"
-            onClick={() => dialogRef.current?.close('skip')}
+            onClick={() => {
+              if (dialogRef.current) void closeTopLayer(dialogRef.current, 'skip');
+            }}
           >
             Skip time
           </button>

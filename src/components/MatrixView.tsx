@@ -16,20 +16,11 @@ export interface MatrixViewProps {
   onRequestComplete: (task: TaskItem) => void;
   onUncomplete: (taskId: string) => void;
   onDeleteTask: (taskId: string) => void;
-  onUpdateDetails: (
-    taskId: string,
-    patch: Partial<
-      Pick<TaskItem, 'title' | 'dueDate' | 'estimatedMinutes' | 'notes' | 'tags' | 'checklist'>
-    >
-  ) => void;
-  onAddSubtask: (taskId: string, text: string) => void;
-  onToggleSubtask: (taskId: string, subtaskId: string) => void;
-  onDeleteSubtask: (taskId: string, subtaskId: string) => void;
   onResolveConflict: (taskId: string, strategy: 'KEEP_PRIMARY' | 'FORK_OVERLAP') => void;
   onGoTriage: () => void;
   onFocusTask: (taskId: string) => void;
-  expandedTaskId: string | null;
-  onSetExpandedTaskId: (id: string | null) => void;
+  editingTaskId: string | null;
+  onOpenTaskEditor: (taskId: string, anchorRect: DOMRect) => void;
 }
 
 const MATRIX_QUADRANTS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
@@ -53,17 +44,12 @@ export function MatrixView({
   onRequestComplete,
   onUncomplete,
   onDeleteTask,
-  onUpdateDetails,
-  onAddSubtask,
-  onToggleSubtask,
-  onDeleteSubtask,
   onResolveConflict,
   onGoTriage,
   onFocusTask,
-  expandedTaskId,
-  onSetExpandedTaskId,
+  editingTaskId,
+  onOpenTaskEditor,
 }: MatrixViewProps) {
-  const [subtaskDraft, setSubtaskDraft] = useState('');
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const draggingTaskIdRef = useRef<string | null>(null);
   const [activeDropTarget, setActiveDropTarget] = useState<Quadrant | null>(null);
@@ -401,8 +387,10 @@ export function MatrixView({
         key={task.id}
         class={`task-item ${task.completed ? 'completed' : ''} ${
           draggingTaskId === task.id ? 'is-dragging' : ''
-        } ${isGrabbed ? 'is-grabbed' : ''} ${indicatorClass}`.trim()}
-        draggable={expandedTaskId !== task.id}
+        } ${isGrabbed ? 'is-grabbed' : ''} ${
+          editingTaskId === task.id ? 'is-editing' : ''
+        } ${indicatorClass}`.trim()}
+        draggable={true}
         onDragStart={(e) => handleDragStart(e, task.id)}
         onDragOver={(e) => handleItemDragOver(task, e)}
         onDrop={(e) => handleItemDrop(task, e)}
@@ -446,10 +434,14 @@ export function MatrixView({
           />
           <div
             class="task-body"
-            onClick={() => onSetExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+            onClick={(e) => {
+              const itemEl = e.currentTarget.closest('.task-item');
+              const rect = (itemEl ?? e.currentTarget).getBoundingClientRect();
+              onOpenTaskEditor(task.id, rect);
+            }}
             style={{ cursor: 'pointer' }}
           >
-            <div class="task-title" title="Click to expand/edit">
+            <div class="task-title" title="Click to edit">
               {task.title}
             </div>
 
@@ -480,6 +472,18 @@ export function MatrixView({
               {task.dueDate && <span class="tag-chip">{task.dueDate}</span>}
               {task.estimatedMinutes && (
                 <span class="tag-chip">~{task.estimatedMinutes}m</span>
+              )}
+              {task.tags && task.tags.length > 0 && (
+                <>
+                  {task.tags.slice(0, 4).map((tag) => (
+                    <span key={tag} class="tag-chip tag-custom">
+                      {tag.startsWith('#') ? tag : `#${tag}`}
+                    </span>
+                  ))}
+                  {task.tags.length > 4 && (
+                    <span class="tag-chip tag-custom">+{task.tags.length - 4}</span>
+                  )}
+                </>
               )}
             </div>
 
@@ -527,116 +531,6 @@ export function MatrixView({
                     Dismiss
                   </button>
                 </span>
-              </div>
-            )}
-
-            {expandedTaskId === task.id && (
-              <div
-                class="task-drawer-inline"
-                onClick={(e) => e.stopPropagation()}
-                style={{ cursor: 'default' }}
-              >
-                <div class="task-edit-row">
-                  <input
-                    type="text"
-                    class="capture-input"
-                    style={{
-                      padding: '0.25rem 0.45rem',
-                      fontSize: '0.82rem',
-                    }}
-                    placeholder="Task title..."
-                    defaultValue={task.title}
-                    onBlur={(e) => {
-                      const val = (e.currentTarget as HTMLInputElement).value.trim();
-                      if (val && val !== task.title) {
-                        onUpdateDetails(task.id, { title: val });
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const val = (e.currentTarget as HTMLInputElement).value.trim();
-                        if (val && val !== task.title) {
-                          onUpdateDetails(task.id, { title: val });
-                        }
-                        (e.currentTarget as HTMLInputElement).blur();
-                      }
-                    }}
-                  />
-                  <input
-                    type="date"
-                    class="capture-date"
-                    aria-label="Due Date"
-                    value={task.dueDate || ''}
-                    onInput={(e) => {
-                      const val = (e.currentTarget as HTMLInputElement).value;
-                      onUpdateDetails(task.id, { dueDate: val || undefined });
-                    }}
-                  />
-                  <input
-                    type="text"
-                    class="capture-input"
-                    style={{
-                      padding: '0.25rem 0.45rem',
-                      fontSize: '0.82rem',
-                    }}
-                    placeholder="Notes..."
-                    value={task.notes || ''}
-                    onInput={(e) => {
-                      const val = (e.currentTarget as HTMLInputElement).value;
-                      onUpdateDetails(task.id, { notes: val });
-                    }}
-                  />
-                </div>
-
-                {totalChecklist > 0 && (
-                  <div class="subtask-list">
-                    {(task.checklist || []).map((item) => (
-                      <div key={item.id} class={`subtask-item ${item.done ? 'done' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={item.done}
-                          onChange={() => onToggleSubtask(task.id, item.id)}
-                          aria-label={`Toggle subtask "${item.text}"`}
-                        />
-                        <span class="subtask-text">{item.text}</span>
-                        <button
-                          type="button"
-                          class="icon-btn"
-                          title="Delete subtask"
-                          onClick={() => onDeleteSubtask(task.id, item.id)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <form
-                  class="subtask-add-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!subtaskDraft.trim()) return;
-                    onAddSubtask(task.id, subtaskDraft);
-                    setSubtaskDraft('');
-                  }}
-                >
-                  <input
-                    type="text"
-                    class="capture-input"
-                    style={{
-                      padding: '0.25rem 0.45rem',
-                      fontSize: '0.82rem',
-                    }}
-                    placeholder="Add subtask (press Enter)..."
-                    value={subtaskDraft}
-                    onInput={(e) => setSubtaskDraft((e.currentTarget as HTMLInputElement).value)}
-                  />
-                  <button type="submit" class="btn btn-sm btn-primary">
-                    + Subtask
-                  </button>
-                </form>
               </div>
             )}
           </div>

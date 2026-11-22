@@ -98,10 +98,16 @@ export function reconcileBreaks(
   return result;
 }
 
-const SCOPE_QUADRANTS: Record<WorkBlockScope, Quadrant[]> = {
+export const SCOPE_QUADRANTS: Record<WorkBlockScope, Quadrant[]> = {
   Q2_ONLY: ['Q2'],
   Q2_FIRST: ['Q2', 'Q1', 'Q3', 'Q4'],
-  Q1_Q2: ['Q2', 'Q1'],
+  Q1_Q2: ['Q1', 'Q2'],
+};
+
+export const SCOPE_DESCRIPTIONS: Record<WorkBlockScope, string> = {
+  Q2_FIRST: 'Q2 deep work first, then Q1, Q3, Q4',
+  Q2_ONLY: 'Strict Q2 deep work only',
+  Q1_Q2: 'Q1 urgent fires first, then Q2 deep work',
 };
 
 export function autoPlanWorkBlock(

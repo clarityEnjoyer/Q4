@@ -140,6 +140,13 @@ export function formatMinutesAsDecimalHours(minutes?: number): string {
   return String(rounded);
 }
 
+export function formatClock24h(ms: number): string {
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 export function calculateOffsetDate(
   offset: number,
   baseDate: Date = new Date()
@@ -541,10 +548,33 @@ export function deleteTask(state: AppState, taskId: string): AppState {
   };
 }
 
+function sanitizePositiveMinutes(minutes?: number): number | undefined {
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0) {
+    return undefined;
+  }
+  return Math.round(minutes);
+}
+
+export function getSubtasksEstimatedMinutes(checklist?: SubtaskItem[]): number {
+  if (!checklist || checklist.length === 0) return 0;
+  let total = 0;
+  for (const sub of checklist) {
+    if (
+      typeof sub.estimatedMinutes === 'number' &&
+      Number.isFinite(sub.estimatedMinutes) &&
+      sub.estimatedMinutes > 0
+    ) {
+      total += Math.round(sub.estimatedMinutes);
+    }
+  }
+  return total;
+}
+
 export function addSubtask(
   state: AppState,
   taskId: string,
-  text: string
+  text: string,
+  estimatedMinutes?: number
 ): AppState {
   const existing = state.tasks[taskId];
   if (!existing || existing.deleted) return state;
@@ -557,12 +587,97 @@ export function addSubtask(
     id: generateId('sub'),
     text: cleanText,
     done: false,
+    estimatedMinutes: sanitizePositiveMinutes(estimatedMinutes),
   };
 
   const checklist: SubtaskItem[] = [
     ...(existing.checklist || []).map((s) => ({ ...s })),
     newSubtask,
   ];
+
+  return {
+    ...state,
+    maxLamport: clock.lamport,
+    tasks: {
+      ...state.tasks,
+      [taskId]: {
+        ...existing,
+        checklist,
+        concurrentConflicts: undefined,
+        clock,
+      },
+    },
+  };
+}
+
+export function updateSubtask(
+  state: AppState,
+  taskId: string,
+  subtaskId: string,
+  patch: Partial<Pick<SubtaskItem, 'text' | 'estimatedMinutes'>>
+): AppState {
+  const existing = state.tasks[taskId];
+  if (!existing || existing.deleted || !existing.checklist) return state;
+
+  const idx = existing.checklist.findIndex((s) => s.id === subtaskId);
+  if (idx === -1) return state;
+
+  const currentSub = existing.checklist[idx];
+  const nextText =
+    patch.text !== undefined ? patch.text.trim() : currentSub.text;
+  if (!nextText) return state;
+
+  const nextEstimated =
+    'estimatedMinutes' in patch
+      ? sanitizePositiveMinutes(patch.estimatedMinutes)
+      : currentSub.estimatedMinutes;
+
+  const clock = nextClock(state);
+  const checklist = existing.checklist.map((s) =>
+    s.id === subtaskId
+      ? { ...s, text: nextText, estimatedMinutes: nextEstimated }
+      : { ...s }
+  );
+
+  return {
+    ...state,
+    maxLamport: clock.lamport,
+    tasks: {
+      ...state.tasks,
+      [taskId]: {
+        ...existing,
+        checklist,
+        concurrentConflicts: undefined,
+        clock,
+      },
+    },
+  };
+}
+
+export function reorderSubtask(
+  state: AppState,
+  taskId: string,
+  fromIndex: number,
+  toIndex: number
+): AppState {
+  const existing = state.tasks[taskId];
+  if (!existing || existing.deleted || !existing.checklist) return state;
+
+  const len = existing.checklist.length;
+  if (
+    fromIndex < 0 ||
+    fromIndex >= len ||
+    toIndex < 0 ||
+    toIndex >= len ||
+    fromIndex === toIndex
+  ) {
+    return state;
+  }
+
+  const clock = nextClock(state);
+  const checklist = existing.checklist.map((s) => ({ ...s }));
+  const [moved] = checklist.splice(fromIndex, 1);
+  checklist.splice(toIndex, 0, moved);
 
   return {
     ...state,

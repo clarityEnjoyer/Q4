@@ -25,8 +25,8 @@
   --q4-border: rgba(100, 116, 139, 0.22);
 
   --inbox-color: #38bdf8;
-  --radius: 10px;
-  --radius-sm: 7px;
+  --radius: 12px;
+  --radius-sm: 8px;
 }
 
 * {
@@ -37,6 +37,9 @@
 
 body {
   background-color: var(--bg-base);
+  background-image:
+    radial-gradient(ellipse 80% 45% at 20% -10%, rgba(16, 185, 129, 0.08), transparent),
+    radial-gradient(ellipse 70% 40% at 85% -10%, rgba(56, 189, 248, 0.07), transparent);
   color: var(--text-main);
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
   line-height: 1.45;
@@ -46,6 +49,16 @@ body {
 
 code, pre, .mono {
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.mono,
+.timer-digits,
+.wb-slot-time,
+.wb-time-pill,
+.wb-timeline-axis,
+.pill,
+.tag-chip {
+  font-variant-numeric: tabular-nums;
 }
 
 .app-shell {
@@ -271,14 +284,16 @@ code, pre, .mono {
   left: 0;
   z-index: 1000;
   width: 310px;
-  background: var(--bg-card);
+  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+  backdrop-filter: blur(14px);
   border: 1px solid var(--border-focus);
   border-radius: var(--radius);
   padding: 0.85rem;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 38px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  transform-origin: top left;
 }
 
 .popover-header {
@@ -723,8 +738,18 @@ code, pre, .mono {
 /* Tactile Hover Lift */
 .task-item:hover {
   border-color: var(--text-muted);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .task-item:hover {
+    transform: translateY(-2px);
+  }
+}
+
+.task-item.is-editing {
+  border-color: var(--inbox-color);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35), 0 8px 22px rgba(0, 0, 0, 0.38);
 }
 
 /* Grabbing / Active State */
@@ -829,6 +854,12 @@ code, pre, .mono {
 .tag-q2-focus {
   background: rgba(16, 185, 129, 0.15);
   color: #6ee7b7;
+}
+
+.tag-custom {
+  background: rgba(56, 189, 248, 0.12);
+  color: #bae6fd;
+  border: 1px solid rgba(56, 189, 248, 0.26);
 }
 
 .task-actions {
@@ -1028,29 +1059,424 @@ code, pre, .mono {
   color: #7dd3fc;
 }
 
-/* Native Modal Dialog (<dialog>) */
+/* Native Modal Dialogs & Top-Layer Transitions */
 dialog:modal {
   overscroll-behavior: contain;
+}
+
+dialog.complete-dialog,
+dialog.task-editor-dialog {
+  opacity: 0;
+  color: var(--text-main);
+  background: color-mix(in srgb, var(--bg-card) 94%, transparent);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-focus);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 22px 48px rgba(0, 0, 0, 0.62);
+  transition-property: opacity, transform, display, overlay;
+  transition-duration: 0.24s;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
 }
 
 dialog::backdrop {
   overflow: hidden;
   overscroll-behavior: contain;
-  background-color: rgba(0, 0, 0, 0.58);
-  backdrop-filter: blur(2px);
+  background-color: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(0px);
+  transition-property: background-color, backdrop-filter, display, overlay;
+  transition-duration: 0.24s;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
+}
+
+:is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing])) {
+  opacity: 1;
+}
+
+:is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing]))::backdrop {
+  background-color: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(5px);
+}
+
+@starting-style {
+  :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing])) {
+    opacity: 0;
+  }
+  :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing]))::backdrop {
+    background-color: rgba(0, 0, 0, 0);
+    backdrop-filter: blur(0px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  dialog.complete-dialog,
+  dialog.task-editor-dialog {
+    transform: scale(0.96) translateY(6px);
+    transition-timing-function: linear(0, 0.45 15%, 1.04 45%, 0.99 72%, 1);
+  }
+  :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing])) {
+    transform: scale(1) translateY(0);
+  }
+  @starting-style {
+    :is(dialog.complete-dialog[open], dialog.task-editor-dialog[open]):where(:not([data-closing])) {
+      transform: scale(0.95) translateY(8px);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.complete-dialog,
+  dialog.task-editor-dialog,
+  dialog::backdrop {
+    transition-duration: 0.12s;
+  }
 }
 
 .complete-dialog[open] {
   margin: auto;
-  background: var(--bg-card);
-  color: var(--text-main);
-  border: 1px solid var(--border-focus);
   border-radius: var(--radius);
   padding: 1.25rem;
   width: min(420px, calc(100vw - 2rem));
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.6);
   display: flex;
   flex-direction: column;
+}
+
+/* Anchored Task Editor Popover & Mobile Sheet */
+.task-editor-dialog[open] {
+  position: fixed;
+  margin: 0;
+  border-radius: var(--radius);
+  padding: 1.1rem 1.15rem;
+  max-height: min(84vh, 660px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-editor-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.sheet-grabber {
+  display: none;
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-focus);
+  margin: -0.25rem auto 0.15rem;
+  flex-shrink: 0;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.editor-quadrant-select {
+  background: var(--bg-base);
+  border: 1px solid var(--border-focus);
+  color: var(--text-main);
+  padding: 0.35rem 0.55rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.editor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.editor-title-input {
+  width: 100%;
+  font-size: 1.02rem;
+  font-weight: 700;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg-base);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  outline: none;
+}
+
+.editor-title-input:focus {
+  border-color: var(--inbox-color);
+}
+
+.editor-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.editor-meta-field,
+.editor-notes-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.editor-meta-field .capture-hours-wrapper,
+.editor-meta-field .capture-hours-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.editor-due-wrapper,
+.editor-due-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.editor-due-wrapper .capture-date,
+.editor-due-row .capture-date {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-base);
+  border: 1px solid var(--border-focus);
+  color: var(--text-main);
+  padding: 0.48rem 0.55rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+}
+
+.editor-tags-section,
+.editor-subtasks-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.editor-field-label,
+.editor-section-label,
+.editor-subtasks-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.editor-tags-list,
+.editor-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.editor-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.74rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.14);
+  color: #bae6fd;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  font-family: monospace;
+}
+
+.editor-tag-remove {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  opacity: 0.75;
+}
+
+.editor-tag-remove:hover {
+  opacity: 1;
+}
+
+.editor-tag-input {
+  width: 100%;
+  min-width: 120px;
+  padding: 0.36rem 0.58rem;
+  font-size: 0.82rem;
+}
+
+.editor-notes {
+  width: 100%;
+  resize: vertical;
+  min-height: 54px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-focus);
+  color: var(--text-main);
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.editor-notes:focus {
+  border-color: var(--inbox-color);
+}
+
+.editor-subtasks-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.editor-subtasks-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.editor-subtasks-sum {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6ee7b7;
+}
+
+.editor-subtasks-list,
+.editor-subtask-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.editor-subtask-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.34rem 0.45rem;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.editor-subtask-row.is-dragging {
+  opacity: 0.35;
+  border-style: dashed;
+}
+
+.editor-subtask-row.done .editor-subtask-text {
+  text-decoration: line-through;
+  color: var(--text-dim);
+}
+
+.editor-subtask-text {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-main);
+  font-size: 0.82rem;
+  padding: 0.18rem 0.3rem;
+  border-radius: 4px;
+  outline: none;
+}
+
+.editor-subtask-text:focus {
+  background: var(--bg-elevated);
+  border-color: var(--inbox-color);
+}
+
+.editor-subtask-hours {
+  width: 60px;
+  min-width: 50px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-focus);
+  color: var(--text-main);
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.74rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-subtask-hours::-webkit-outer-spin-button,
+.editor-subtask-hours::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.editor-subtask-hours[type=number] {
+  -moz-appearance: textfield;
+}
+
+.editor-subtask-minutes-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.editor-subtask-add-form,
+.editor-subtask-add {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.editor-subtask-add-input,
+.editor-subtask-add .capture-input {
+  flex: 1;
+  min-width: 130px;
+  padding: 0.34rem 0.55rem;
+  font-size: 0.82rem;
+}
+
+.editor-subtask-add-hours,
+.editor-subtask-add .capture-hours-input {
+  width: 112px;
+  min-width: 90px;
+  padding: 0.34rem 2.1rem 0.34rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 640px) {
+  .task-editor-dialog[open] {
+    inset: auto 0 0 0 !important;
+    width: 100% !important;
+    max-width: none;
+    max-height: 88dvh;
+    margin: 0;
+    border-radius: 18px 18px 0 0;
+    padding: 0.9rem 1rem calc(1.1rem + env(safe-area-inset-bottom));
+    transform-origin: bottom center !important;
+  }
+  .sheet-grabber {
+    display: block;
+  }
+  .editor-meta-grid {
+    grid-template-columns: 1fr;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    dialog.task-editor-dialog {
+      transform: translateY(100%);
+    }
+    dialog.task-editor-dialog[open]:where(:not([data-closing])) {
+      transform: translateY(0);
+    }
+    @starting-style {
+      dialog.task-editor-dialog[open]:where(:not([data-closing])) {
+        transform: translateY(100%);
+      }
+    }
+  }
 }
 
 .complete-dialog-form {
@@ -1149,7 +1575,9 @@ dialog::backdrop {
 .task-item.drop-before::before,
 .task-item.drop-after::after,
 .wb-sprint-card.drop-before::before,
-.wb-sprint-card.drop-after::after {
+.wb-sprint-card.drop-after::after,
+.editor-subtask-row.drop-before::before,
+.editor-subtask-row.drop-after::after {
   content: '';
   position: absolute;
   left: 4px;
@@ -1163,12 +1591,14 @@ dialog::backdrop {
 }
 
 .task-item.drop-before::before,
-.wb-sprint-card.drop-before::before {
+.wb-sprint-card.drop-before::before,
+.editor-subtask-row.drop-before::before {
   top: -4px;
 }
 
 .task-item.drop-after::after,
-.wb-sprint-card.drop-after::after {
+.wb-sprint-card.drop-after::after,
+.editor-subtask-row.drop-after::after {
   bottom: -4px;
 }
 
@@ -1503,11 +1933,34 @@ dialog::backdrop {
   flex: 1;
 }
 
+.wb-timeline-axis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-main);
+  padding: 0 0.15rem;
+}
+
+.wb-scope-hint {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.wb-time-pill,
 .wb-slot-time,
 .wb-sprint-time {
-  font-size: 0.7rem;
-  color: var(--text-dim);
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-focus);
+  border-radius: 5px;
+  padding: 0.14rem 0.48rem;
+  font-size: 0.78rem;
+  font-weight: 700;
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
 .wb-slot-title,
@@ -1763,12 +2216,46 @@ dialog::backdrop {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
+@media (hover: none) {
+  .task-actions,
+  .drag-handle {
+    opacity: 1;
+  }
+}
+
+@keyframes viewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+}
+
+@keyframes popoverReveal {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn,
+  .nav-tab,
+  .pill,
+  .wb-picker-row,
+  .wb-sprint-card {
+    transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  }
+  .btn:active:not(:disabled),
+  .nav-tab:active,
+  .pill-sync:active,
+  .wb-picker-row:active {
+    transform: scale(0.97);
+  }
+  .app-shell > main > * {
+    animation: viewEnter 0.22s ease-out both;
+  }
+  .calendar-popover {
+    animation: popoverReveal 0.18s ease-out both;
   }
 }
 
@@ -1939,7 +2426,19 @@ dialog::backdrop {
   font-size: 0.8rem;
   padding: 0.25rem 0.4rem;
   background: var(--bg-elevated);
+  border: 1px solid transparent;
   border-radius: 4px;
+}
+
+.subtask-item.dragging {
+  opacity: 0.35;
+  border-style: dashed;
+}
+
+.subtask-item.drag-over {
+  border-color: var(--inbox-color);
+  outline: 2px dashed var(--inbox-color);
+  outline-offset: -2px;
 }
 
 .subtask-item.done .subtask-text {

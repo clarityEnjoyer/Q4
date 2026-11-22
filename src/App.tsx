@@ -3,6 +3,7 @@ import { CaptureBar } from './components/CaptureBar';
 import { CompleteTaskDialog } from './components/CompleteTaskDialog';
 import { MatrixView } from './components/MatrixView';
 import { SyncLabView } from './components/SyncLabView';
+import { TaskEditorPopover } from './components/TaskEditorPopover';
 import { TriageView } from './components/TriageView';
 import { WorkBlockView } from './components/WorkBlockView';
 import {
@@ -13,7 +14,9 @@ import {
   deleteSubtask,
   deleteTask,
   escalateNeglectedQ2Tasks,
+  formatClock24h,
   logFocusSession,
+  reorderSubtask,
   reorderTask,
   resolveQuadrant,
   resolveTaskConflict,
@@ -21,6 +24,7 @@ import {
   toggleSubtask,
   toggleTaskCompleted,
   triageTask,
+  updateSubtask,
   updateTaskDetails,
 } from './core/engine';
 import { AppState, GistSyncConfig, TaskItem } from './core/types';
@@ -51,6 +55,11 @@ interface CompletingTargetState {
   onDone?: (actualMinutes?: number) => void;
 }
 
+interface EditingTargetState {
+  taskId: string;
+  anchorRect: DOMRect;
+}
+
 export function App() {
   const [state, setState] = useState<AppState>(() => loadLocalState());
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -76,7 +85,9 @@ export function App() {
     isCalendarOpenRef.current = open;
   }, []);
 
-  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [editingTarget, setEditingTarget] = useState<EditingTargetState | null>(null);
+  const editingTargetRef = useRef<EditingTargetState | null>(editingTarget);
+  editingTargetRef.current = editingTarget;
   const [showCompleted, setShowCompleted] = useState(false);
 
   // Rapid 2-Decision Binary Triage state
@@ -172,7 +183,7 @@ export function App() {
   // Safe global keyboard shortcuts (never hijacks modal dialog, popover, or text inputs)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (completingTargetRef.current) return;
+      if (completingTargetRef.current || editingTargetRef.current) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       const target = e.target as HTMLElement | null;
@@ -188,7 +199,6 @@ export function App() {
       if (isTextEntryFocused) {
         if (e.key === 'Escape') {
           target?.blur();
-          setExpandedTaskId(null);
         }
         return;
       }
@@ -238,8 +248,6 @@ export function App() {
       } else if (e.key === '/') {
         e.preventDefault();
         captureInputRef.current?.focus();
-      } else if (e.key === 'Escape') {
-        setExpandedTaskId(null);
       }
     };
 
@@ -282,12 +290,7 @@ export function App() {
       setState(outcome.mergedState);
       lastSyncedLamportRef.current = outcome.mergedState.maxLamport;
       setSyncStatus('success');
-      setSyncMessage(
-        `Synced ${new Date(outcome.syncedAt).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        })}`
-      );
+      setSyncMessage(`Synced ${formatClock24h(outcome.syncedAt)}`);
     } catch (err: unknown) {
       setSyncStatus('error');
       setSyncMessage(err instanceof Error ? err.message : String(err));
@@ -404,10 +407,7 @@ export function App() {
             {syncStatus === 'syncing'
               ? 'Syncing...'
               : state.lastSyncedAt
-              ? new Date(state.lastSyncedAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
+              ? formatClock24h(state.lastSyncedAt)
               : 'Sync'}
           </button>
         </div>
@@ -518,18 +518,6 @@ export function App() {
             onDeleteTask={(taskId) =>
               setState((curr) => deleteTask(curr, taskId))
             }
-            onUpdateDetails={(taskId, patch) =>
-              setState((curr) => updateTaskDetails(curr, taskId, patch))
-            }
-            onAddSubtask={(taskId, text) =>
-              setState((curr) => addSubtask(curr, taskId, text))
-            }
-            onToggleSubtask={(taskId, subtaskId) =>
-              setState((curr) => toggleSubtask(curr, taskId, subtaskId))
-            }
-            onDeleteSubtask={(taskId, subtaskId) =>
-              setState((curr) => deleteSubtask(curr, taskId, subtaskId))
-            }
             onResolveConflict={(taskId, strategy) =>
               setState((curr) => resolveTaskConflict(curr, taskId, strategy))
             }
@@ -538,8 +526,10 @@ export function App() {
               setFocusRequestTaskId(taskId);
               setViewMode('MORNING_Q2');
             }}
-            expandedTaskId={expandedTaskId}
-            onSetExpandedTaskId={setExpandedTaskId}
+            editingTaskId={editingTarget?.taskId ?? null}
+            onOpenTaskEditor={(taskId, anchorRect) =>
+              setEditingTarget({ taskId, anchorRect })
+            }
           />
         )}
 
@@ -568,11 +558,17 @@ export function App() {
             onRequestCompleteFromWorkBlock={(task, suggestedMinutes, onCompleted) =>
               setCompletingTarget({ task, suggestedMinutes, onDone: onCompleted })
             }
-            onAddSubtask={(taskId, text) =>
-              setState((curr) => addSubtask(curr, taskId, text))
+            onAddSubtask={(taskId, text, estimatedMinutes) =>
+              setState((curr) => addSubtask(curr, taskId, text, estimatedMinutes))
+            }
+            onUpdateSubtask={(taskId, subtaskId, patch) =>
+              setState((curr) => updateSubtask(curr, taskId, subtaskId, patch))
             }
             onToggleSubtask={(taskId, subtaskId) =>
               setState((curr) => toggleSubtask(curr, taskId, subtaskId))
+            }
+            onReorderSubtask={(taskId, fromIndex, toIndex) =>
+              setState((curr) => reorderSubtask(curr, taskId, fromIndex, toIndex))
             }
             onGoMatrix={() => setViewMode('MATRIX')}
           />
@@ -616,6 +612,48 @@ export function App() {
           />
         )}
       </main>
+
+      <TaskEditorPopover
+        task={
+          editingTarget &&
+          state.tasks[editingTarget.taskId] &&
+          !state.tasks[editingTarget.taskId].deleted
+            ? state.tasks[editingTarget.taskId]
+            : null
+        }
+        anchorRect={editingTarget?.anchorRect ?? null}
+        onClose={() => setEditingTarget(null)}
+        onUpdateDetails={(taskId, patch) =>
+          setState((curr) => updateTaskDetails(curr, taskId, patch))
+        }
+        onMoveQuadrant={(taskId, targetQuadrant) =>
+          setState((curr) => reorderTask(curr, taskId, targetQuadrant, undefined))
+        }
+        onDeleteTask={(taskId) => {
+          setEditingTarget(null);
+          setState((curr) => deleteTask(curr, taskId));
+        }}
+        onFocusTask={(taskId) => {
+          setEditingTarget(null);
+          setFocusRequestTaskId(taskId);
+          setViewMode('MORNING_Q2');
+        }}
+        onAddSubtask={(taskId, text, estimatedMinutes) =>
+          setState((curr) => addSubtask(curr, taskId, text, estimatedMinutes))
+        }
+        onUpdateSubtask={(taskId, subtaskId, patch) =>
+          setState((curr) => updateSubtask(curr, taskId, subtaskId, patch))
+        }
+        onToggleSubtask={(taskId, subtaskId) =>
+          setState((curr) => toggleSubtask(curr, taskId, subtaskId))
+        }
+        onDeleteSubtask={(taskId, subtaskId) =>
+          setState((curr) => deleteSubtask(curr, taskId, subtaskId))
+        }
+        onReorderSubtask={(taskId, fromIndex, toIndex) =>
+          setState((curr) => reorderSubtask(curr, taskId, fromIndex, toIndex))
+        }
+      />
 
       <CompleteTaskDialog
         task={completingTarget?.task ?? null}

@@ -27,7 +27,7 @@
 - `src/core/engine.ts`: Pure mutations (`addTask`, `reorderTask`, `completeTaskWithTime`, `sortTasksInBlock`, `computeBoronAnalytics`, capture/date helpers).
 - `src/core/workBlock.ts`: Pure Work Block planner (`autoPlanWorkBlock`, `reconcileBreaks`, `computeWorkBlockSchedule`, `moveWorkBlockItem`).
 - `src/core/markdown.ts`: Two-way Markdown export/import (`serializeToMarkdown`, `parseMarkdownTaskLines`).
-- `src/components/`: `CaptureBar.tsx`, `MatrixView.tsx`, `TriageView.tsx`, `WorkBlockView.tsx`, `CompleteTaskDialog.tsx`, `SyncLabView.tsx`.
+- `src/components/`: `CaptureBar.tsx`, `MatrixView.tsx`, `TaskEditorPopover.tsx`, `TriageView.tsx`, `WorkBlockView.tsx`, `CompleteTaskDialog.tsx`, `dialogMotion.ts`, `SyncLabView.tsx`.
 - `src/sync/`: `storage.ts` (LocalStorage/prefs/export), `gistSync.ts` (GitHub Gist CRDT sync), `types.ts`.
 - `src/visuals/`: `themes.ts` (`THEME_REGISTRY`, `applyVisualTheme`), `analyticsWidgets.tsx` (`ANALYTICS_WIDGET_REGISTRY`).
 - `src/App.tsx`: Slim shell routing views, global keyboard shortcuts, and `CompleteTaskDialog`.

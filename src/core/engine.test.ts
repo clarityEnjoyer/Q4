@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addSubtask,
   addTask,
   calculateOffsetDate,
   completeTaskWithTime,
   computeBoronAnalytics,
   createStarterState,
   escalateNeglectedQ2Tasks,
+  formatClock24h,
   formatMinutesAsDecimalHours,
+  getSubtasksEstimatedMinutes,
   logFocusSession,
   parseDecimalHours,
+  reorderSubtask,
   reorderTask,
   sortTasksInBlock,
   toggleTaskCompleted,
+  updateSubtask,
 } from './engine';
 import { parseMarkdownTaskLines, serializeToMarkdown } from './markdown';
 import { AppState } from './types';
@@ -239,5 +244,53 @@ describe('Boron Q4 Engine: Ordering, Capture, Time Tracking & Analytics', () => 
     } finally {
       globalThis.localStorage = orig;
     }
+  });
+
+  it('formats 24h European clocks and manages subtask time estimates + reordering', () => {
+    const afternoon = new Date(2026, 10, 22, 16, 5).getTime();
+    const midnight = new Date(2026, 10, 22, 0, 9).getTime();
+    expect(formatClock24h(afternoon)).toBe('16:05');
+    expect(formatClock24h(midnight)).toBe('00:09');
+    expect(formatClock24h(afternoon)).not.toMatch(/am|pm/i);
+
+    let state = createStarterState('node_subtasks');
+    const taskId = 'starter_q2_asd';
+    state = addSubtask(state, taskId, 'Read DP notes', 15);
+    state = addSubtask(state, taskId, 'Implement recurrence', 30);
+    state = addSubtask(state, taskId, 'Invalid negative time', -10);
+
+    const subs = state.tasks[taskId].checklist!;
+    expect(subs.length).toBe(3);
+    expect(subs[0].estimatedMinutes).toBe(15);
+    expect(subs[2].estimatedMinutes).toBeUndefined();
+    expect(getSubtasksEstimatedMinutes(subs)).toBe(45);
+
+    // Update subtask text + estimatedMinutes
+    state = updateSubtask(state, taskId, subs[0].id, {
+      text: 'Read DP notes + examples',
+      estimatedMinutes: 20,
+    });
+    expect(state.tasks[taskId].checklist![0].text).toBe('Read DP notes + examples');
+    expect(getSubtasksEstimatedMinutes(state.tasks[taskId].checklist)).toBe(50);
+
+    // Reorder subtask 2 -> 0
+    state = reorderSubtask(state, taskId, 2, 0);
+    expect(state.tasks[taskId].checklist!.map((s) => s.text)).toEqual([
+      'Invalid negative time',
+      'Read DP notes + examples',
+      'Implement recurrence',
+    ]);
+
+    // No-op & out-of-bounds reorder keep state & clock unchanged
+    const lamportBefore = state.maxLamport;
+    expect(reorderSubtask(state, taskId, 1, 1)).toBe(state);
+    expect(reorderSubtask(state, taskId, -1, 0)).toBe(state);
+    expect(reorderSubtask(state, taskId, 0, 99)).toBe(state);
+    expect(state.maxLamport).toBe(lamportBefore);
+
+    // Markdown export appends subtask ~Xm
+    const md = serializeToMarkdown(state);
+    expect(md).toContain('  - [ ] Read DP notes + examples ~20m');
+    expect(md).toContain('  - [ ] Implement recurrence ~30m');
   });
 });

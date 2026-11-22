@@ -9,6 +9,8 @@ import {
   moveWorkBlockItem,
   reconcileBreaks,
   resolveLogQuadrant,
+  SCOPE_DESCRIPTIONS,
+  SCOPE_QUADRANTS,
   WorkBlockItem,
 } from './workBlock';
 
@@ -46,11 +48,15 @@ describe('Work Block Pure Planner & Schedule Engine', () => {
     expect(q2FirstIds).toContain('starter_q1_so');
     expect(q2FirstIds).toContain('starter_q3_parcel');
 
-    // Q1_Q2 excludes Q3/Q4
+    // Q1_Q2 schedules Q1 urgent tasks strictly before Q2 and excludes Q3/Q4
     const q1q2 = autoPlanWorkBlock(allTasks, 300, { scope: 'Q1_Q2', includeBreaks: false });
     const q1q2Ids = q1q2.map((i) => (i.type === 'task' ? i.taskId : 'rest'));
-    expect(q1q2Ids).toContain('starter_q1_so');
+    expect(q1q2Ids[0]).toBe('starter_q1_so');
+    expect(q1q2Ids.indexOf('starter_q1_so')).toBeLessThan(q1q2Ids.indexOf('q2_top'));
+    expect(q1q2Ids).toContain('q2_top');
     expect(q1q2Ids).not.toContain('starter_q3_parcel');
+    expect(SCOPE_QUADRANTS.Q1_Q2).toEqual(['Q1', 'Q2']);
+    expect(SCOPE_DESCRIPTIONS.Q1_Q2).toContain('Q1');
 
     // Tight budget (10m) still yields at least the top-priority task (non-empty fallback)
     const tight = autoPlanWorkBlock(allTasks, 10, { scope: 'Q2_ONLY', includeBreaks: true });

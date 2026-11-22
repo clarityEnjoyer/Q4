@@ -60,7 +60,7 @@ function toConcurrentValue(t: TaskItem): ConcurrentTaskValue {
 function contentSignature(v: ConcurrentTaskValue): string {
   const tagsStr = [...(v.tags || [])].sort().join(',');
   const checklistStr = (v.checklist || [])
-    .map((s) => `${s.id}:${s.done ? 1 : 0}:${s.text}`)
+    .map((s) => `${s.id}:${s.done ? 1 : 0}:${s.estimatedMinutes ?? ''}:${s.text}`)
     .join('^');
   return `${v.title}|${v.notes || ''}|${v.quadrant}|${v.completed}|${v.dueDate || ''}|${v.estimatedMinutes || ''}|${v.actualMinutes ?? ''}|${v.order ?? ''}|${tagsStr}|${checklistStr}`;
 }
